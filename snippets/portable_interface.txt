@@ -1,0 +1,89 @@
+
+struct ISome;
+
+typedef
+struct ISomeVTable {
+    int(*GetTag)(struct ISome obj);
+
+}ISomeVTable;
+
+typedef
+struct ISome{
+    void* obj;
+    ISomeVTable *v;
+}ISome;
+
+inline
+int Some_GetTag(ISome s) {
+    return s.v->GetTag(s);
+}
+
+typedef
+struct Point {
+    int x;
+    int y;
+    int tag;
+}Point, *PPoint;
+
+
+int ISome_Point_GetTag(ISome s)
+{
+    Point *p = (Point*)s.obj;
+    return p->x + p->y;
+}
+
+ISomeVTable staticSomeVTable = {
+    .GetTag = ISome_Point_GetTag
+};
+
+ISome Point_MakeISome(Point* p){
+    ISome s;
+    s.obj = p;
+    s.v = &staticSomeVTable;
+    return s;
+}
+
+
+struct ISame {
+    void *obj = 0;
+    struct VTable{
+        const char* ClassName = 0;
+        int(*GetTag)(const ISame s);
+    }*v = 0;
+    const char* GetClassName() const { return v->ClassName; }
+    int GetTag() const { return v->GetTag(*this); }
+};
+
+
+
+int ISame_Point_GetTag(const ISame s)
+{
+    Point *p =(Point*)s.obj;
+    return p->tag;
+}
+
+ISame::VTable Point_ISameVTable {
+    .ClassName = "Point",
+    .GetTag = ISame_Point_GetTag
+};
+
+ISame Point_as_ISame(Point *p)
+{
+    ISame s;
+    s.obj = p;
+    s.v = &Point_ISameVTable;
+    return s;
+}
+
+
+
+    Point p;
+    p.y = 10;
+    p.x = 3;
+    ISome SomeInterface = Point_MakeISome(&p);
+    int point_tag = SomeInterface.v->GetTag(SomeInterface);
+    int point_tag2 =Some_GetTag(SomeInterface);
+
+    ISame same = Point_as_ISame(&p);
+    int same_point_tag = same.GetTag();
+

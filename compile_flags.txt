@@ -1,0 +1,2 @@
+-I/ucrt64/include
+-std=c23

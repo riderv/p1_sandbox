@@ -1,0 +1,23 @@
+# Сборка и временные файлы CMake
+/build/
+/.cmake/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+Makefile
+cmake_install.cmake
+
+# Специфичные файлы Qt Creator
+*.user
+*.user.*
+
+# Скомпилированные исполняемые файлы
+*.exe
+*.out
+*.app
+
+# Временные файлы компилятора
+*.o
+*.obj
+*.pch
+*.gch
