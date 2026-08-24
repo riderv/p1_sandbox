@@ -1,11 +1,8 @@
 #include "pch.h" // IWYU pragma: keep
 
 
-int sum(int a, int b)
-{
-	int c = a + b;
-	return c;
-}
+
+#include "game.hpp"
 
 int main()
 {
@@ -16,17 +13,17 @@ int main()
     MaximizeWindow();
 
 
-    Font jetbrainsMono = LoadFont("JetBrainsMono-SemiBoldItalic.ttf");
+    Font jetbrainsMono = LoadFont("assets/fonts/JetBrainsMono-SemiBoldItalic.ttf");
 
     while (!WindowShouldClose())
     {
         BeginDrawing();
         ClearBackground(BLUE);
         // Задаем позицию для вывода текста
-        Vector2 position = { 100, 200 };
-        DrawTextEx(jetbrainsMono, "Hello! This is JetBrainsMono-SemiBoldItalic.ttf font.", position, 32, 2, MAROON);
-        EndDrawing();
-    }
+        //     Vector2 position = { 100, 200 };
+        //     DrawTextEx(jetbrainsMono, "Hello! This is JetBrainsMono-SemiBoldItalic.ttf font.", position, 32, 2, MAROON);
+        //     EndDrawing();
+        // }
 
     // 3. ОБЯЗАТЕЛЬНО выгружаем шрифт из памяти видеокарты перед выходом
     UnloadFont(jetbrainsMono);

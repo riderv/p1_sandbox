@@ -1,4 +1,32 @@
-#ifndef GAME_HPP
-#define GAME_HPP
+#pragma once
 
-#endif // GAME_HPP
+
+
+struct GameState
+{
+
+
+
+};
+
+inline void Game_Init(GameState& state)
+{
+
+
+}
+
+inline void Game_Update(GameState& state)
+{
+
+
+}
+
+inline void Game_Draw(const GameState& state)
+{
+
+}
+
+inline void Game_Shutdown(GameState& state)
+{
+
+}
