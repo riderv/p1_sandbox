@@ -4,6 +4,9 @@
 
 #include "game.hpp"
 
+
+GameState game_state;
+
 int main()
 {
 
@@ -24,7 +27,7 @@ int main()
         //     DrawTextEx(jetbrainsMono, "Hello! This is JetBrainsMono-SemiBoldItalic.ttf font.", position, 32, 2, MAROON);
         //     EndDrawing();
         // }
-
+    }
     // 3. ОБЯЗАТЕЛЬНО выгружаем шрифт из памяти видеокарты перед выходом
     UnloadFont(jetbrainsMono);
     CloseWindow();

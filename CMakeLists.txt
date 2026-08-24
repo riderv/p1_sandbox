@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(raylib REQUIRED)
 
 # 2. Объявляем исполняемый файл p1 и меняем main.c на main.cpp
-add_executable(p1 src/main.cpp src/game.hpp src/pch.h)
+add_executable(p1 src/main.cpp src/game.hpp src/pch.h src/talloc.c)
 target_compile_options(p1 PRIVATE -fno-exceptions -fno-rtti)
 
 # 3. Подключаем ваш предкомпилированный заголовок pch.h
