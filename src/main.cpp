@@ -5,7 +5,7 @@
 #include "game.hpp"
 
 
-GameState game_state;
+Game game;
 
 int main()
 {
