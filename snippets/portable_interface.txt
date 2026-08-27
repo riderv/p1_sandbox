@@ -87,3 +87,15 @@ ISame Point_as_ISame(Point *p)
     ISame same = Point_as_ISame(&p);
     int same_point_tag = same.GetTag();
 
+
+
+
+
+
+template<class T, typename... Args>
+auto make_interface(T *t, Args... args)
+{
+    
+    
+}
+

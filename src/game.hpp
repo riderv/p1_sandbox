@@ -5,51 +5,78 @@
 extern "C" __declspec(dllimport) int __stdcall MessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType);
 #endif
 
+template <typename T, typename R, typename ...Args>
+inline auto make_callback(R(*func)(T *, Args...))
+{
+    return reinterpret_cast<R(*)(void*, Args...)>(func);
+}
+
 struct Game;
 
-struct GameState
+struct IGameState
 {
-    void (*OnUpdate)(Game& g, float dt);
-    void (*OnDraw)(const Game& g, float dt);
+    void *obj = 0;
+    struct Vtbl {
+        void (*OnUpdate)(void* obj, Game& g, float dt) = 0;
+        void (*OnDraw)(void* obj, const Game& g, float dt) = 0;
+    };
+    Vtbl *v = 0;
+    void OnUpdate(Game& g, float dt) { v->OnUpdate(obj, g, dt); }
+    void OnDraw(const Game& g, float dt) { v->OnDraw(obj, g, dt); }
 };
+
+// inline void GameState_OnUpdate(IGameState *s, Game& g, float dt)
+// {
+//     s->v->OnUpdate(s->obj, g, dt);
+// }
 
 struct MainMenu
 {
+    IGameState myState;
+    Game *g;
     Font font;
 };
 
 struct Game
 {
-    const GameState *state;
+    IGameState *state = 0;
     Font font32;
     MainMenu mMainMenu;
     bool running = true;
 };
 
-inline void MainMenu_Init(Game& g)
+inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
 {
-    g.mMainMenu.font = g.font32;
-
-}
-
-inline void MainMenu_OnUpdate(Game& g, float dt)
-{
+    auto &m = *self;
     if (IsKeyPressed(KEY_ESCAPE)) {
         g.running = false;
     }
 }
 
-inline void MainMenu_OnDraw(const Game& g, float dt)
+inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
 {
+    auto &m = *self;
     ClearBackground(DARKBROWN);
-    DrawTextEx(g.mMainMenu.font, "P1 SANDBOX ENGINE", Vector2{ 80, 150 }, 44, 4, MAROON);
+    DrawTextEx(m.font, "P1 SANDBOX ENGINE", Vector2{ 80, 150 }, 44, 4, MAROON);
 
 }
 
-inline const GameState gMainMenuState = {
-    .OnUpdate = MainMenu_OnUpdate,
-    .OnDraw = MainMenu_OnDraw,
-};
+inline void MainMenu_Init(MainMenu *self, Game& g)
+{
+    auto &m = *(MainMenu*)self;
+
+    m.myState.obj = self;
+    static IGameState::Vtbl v {
+        .OnUpdate = make_callback(MainMenu_OnUpdate),
+        .OnDraw =   make_callback(MainMenu_OnDraw)
+    };
+    m.myState.v = &v;
+
+    m.font = g.font32;
+
+}
+
+
 
 inline void Game_Init(Game& g)
 {
@@ -78,16 +105,13 @@ inline void Game_Init(Game& g)
         #undef  font_file_name
     }
 
-    MainMenu_Init(g);
-    g.state = &gMainMenuState;
-
-
+    MainMenu_Init(&g.mMainMenu, g);
+    g.state = &g.mMainMenu.myState;
 }
 
 inline void Game_Update(Game& g)
 {
-    g.state->OnUpdate(g, GetFrameTime());
-
+    g.state->OnUpdate(g, GetFrameTime() );
 }
 
 inline void Game_Draw(const Game& g)
