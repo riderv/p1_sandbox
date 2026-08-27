@@ -15,21 +15,17 @@ int main()
     SetTargetFPS(60);
     MaximizeWindow();
 
-
-    Font jetbrainsMono = LoadFont("assets/fonts/JetBrainsMono-SemiBoldItalic.ttf");
-
-    while (!WindowShouldClose())
+    Game_Init(game);
+    while (!WindowShouldClose() && game.running)
     {
+        Game_Update(game);
         BeginDrawing();
-        ClearBackground(BLUE);
-        // Задаем позицию для вывода текста
-        //     Vector2 position = { 100, 200 };
-        //     DrawTextEx(jetbrainsMono, "Hello! This is JetBrainsMono-SemiBoldItalic.ttf font.", position, 32, 2, MAROON);
-        //     EndDrawing();
-        // }
+        Game_Draw(game);
+        EndDrawing();
+
     }
-    // 3. ОБЯЗАТЕЛЬНО выгружаем шрифт из памяти видеокарты перед выходом
-    UnloadFont(jetbrainsMono);
+    Game_Shutdown(game);
+
     CloseWindow();
 
     return 0;
