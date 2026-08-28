@@ -32,14 +32,14 @@ struct IGameState
 
 struct MainMenu
 {
-    IGameState myState;
+    IGameState state;
     Game *g;
     Font font;
 };
 
 struct Game
 {
-    IGameState *state = 0;
+    IGameState state;
     Font font32;
     MainMenu mMainMenu;
     bool running = true;
@@ -65,15 +65,15 @@ inline void MainMenu_Init(MainMenu *self, Game& g)
 {
     auto &m = *(MainMenu*)self;
 
-    m.myState.obj = self;
-    static IGameState::Vtbl v {
+    static IGameState::Vtbl v = {
         .OnUpdate = make_callback(MainMenu_OnUpdate),
         .OnDraw =   make_callback(MainMenu_OnDraw)
     };
-    m.myState.v = &v;
+    m.state.obj = self;
+    m.state.v = &v;
+
 
     m.font = g.font32;
-
 }
 
 
@@ -106,17 +106,17 @@ inline void Game_Init(Game& g)
     }
 
     MainMenu_Init(&g.mMainMenu, g);
-    g.state = &g.mMainMenu.myState;
+    g.state = g.mMainMenu.state;
 }
 
 inline void Game_Update(Game& g)
 {
-    g.state->OnUpdate(g, GetFrameTime() );
+    g.state.OnUpdate(g, GetFrameTime() );
 }
 
-inline void Game_Draw(const Game& g)
+inline void Game_Draw(Game& g)
 {
-    g.state->OnDraw(g, GetFrameTime());
+    g.state.OnDraw(g, GetFrameTime());
 }
 
 inline void Game_Shutdown(Game& g)
