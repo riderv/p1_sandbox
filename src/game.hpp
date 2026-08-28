@@ -17,13 +17,19 @@ struct IGameState
 {
     void *obj = 0;
     struct Vtbl {
-        void (*OnUpdate)(void* obj, Game& g, float dt) = 0;
-        void (*OnDraw)(void* obj, const Game& g, float dt) = 0;
+        void (*OnEnter)(void* obj, Game& g) = [](void*, Game&){};
+        void (*OnLeave)(void* obj, Game& g) = [](void*, Game&){};
+        void (*OnUpdate)(void* obj, Game& g, float dt) = [](void*, Game&, float){};
+        void (*OnDraw)(void* obj, const Game& g, float dt) = [](void*, const Game&, float){};
     };
-    Vtbl *v = 0;
+    static Vtbl default_vtbl;
+     Vtbl *v = &default_vtbl;
     void OnUpdate(Game& g, float dt) { v->OnUpdate(obj, g, dt); }
     void OnDraw(const Game& g, float dt) { v->OnDraw(obj, g, dt); }
+    void OnEnter(Game &g) { v->OnEnter(obj, g); }
+    void OnLeave(Game& g) { v->OnLeave(obj, g); }
 };
+inline IGameState::Vtbl IGameState::default_vtbl{};
 
 // inline void GameState_OnUpdate(IGameState *s, Game& g, float dt)
 // {
@@ -44,6 +50,11 @@ struct Game
     MainMenu mMainMenu;
     bool running = true;
 };
+
+inline void MainMenu_OnEnter(MainMenu *self, Game& g)
+{
+
+}
 
 inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
 {
@@ -66,6 +77,7 @@ inline void MainMenu_Init(MainMenu *self, Game& g)
     auto &m = *(MainMenu*)self;
 
     static IGameState::Vtbl v = {
+        .OnEnter = make_callback(MainMenu_OnEnter),
         .OnUpdate = make_callback(MainMenu_OnUpdate),
         .OnDraw =   make_callback(MainMenu_OnDraw)
     };
@@ -76,8 +88,12 @@ inline void MainMenu_Init(MainMenu *self, Game& g)
     m.font = g.font32;
 }
 
-
-
+inline void MainMenu_ChangeState(Game& g, IGameState d)
+{
+    g.state.OnLeave(g);
+    g.state = g.mMainMenu.state;
+    g.state.OnEnter(g);
+}
 inline void Game_Init(Game& g)
 {
 
@@ -105,8 +121,10 @@ inline void Game_Init(Game& g)
         #undef  font_file_name
     }
 
+
     MainMenu_Init(&g.mMainMenu, g);
-    g.state = g.mMainMenu.state;
+    MainMenu_ChangeState(g, g.mMainMenu.state);
+
 }
 
 inline void Game_Update(Game& g)
