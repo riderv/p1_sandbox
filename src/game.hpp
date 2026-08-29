@@ -1,9 +1,13 @@
 #pragma once
 
-// Подключаем маленькую функцию MessageBoxA из Windows.h, не таща весь файл
+
 #if defined(_WIN32)
+// Этот блок останется для Windows, если ты решишь запустить проект там
 extern "C" __declspec(dllimport) int __stdcall MessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType);
+#define WIN_MB_OK           0x00000000L
+#define WIN_MB_ICONERROR    0x00000010L
 #endif
+
 
 template <typename T, typename R, typename ...Args>
 inline auto make_callback(R(*func)(T *, Args...))
@@ -107,15 +111,25 @@ inline void Game_Init(Game& g)
         #define font_file_name "assets/fonts/JetBrainsMonoNL-SemiBold.ttf"
         // 2. Загружаем шрифт в размере 32 пикселя со списком символов
         g.font32 = LoadFontEx(font_file_name, 32, codepoints, codepoints_size);
-        if(!IsFontValid(g.font32)) {
-            MessageBoxA(0,
-                "Critical Error: " font_file_name " not found!\n"
-                "Please check that the 'assets' directory is inside the project root folder.",
-                "P1 Sandbox - Fatal Error",
-                0x00000010L); // 0x10 — это иконка ошибки (MB_ICONERROR) + кнопка ОК
+       if (!IsFontValid(g.font32)) {
+           TraceLog(LOG_ERROR, "CRITICAL: Failed to load main font 'assets/fonts/%s'", font_file_name);
+           
+#if defined(_WIN32)
+           // Для Windows оставляем нативное окошко
+           MessageBoxA(0, 
+               "Critical Error: '" font_file_name "' not found!\n"
+               "Please check that the 'assets' directory is inside the project root folder.", 
+               "P1 Sandbox - Fatal Error", 
+               WIN_MB_OK | WIN_MB_ICONERROR);
+#else
+           // Для Linux выводим красивую графическую ошибку через zenity
+           // Если zenity нет в системе, команда просто тихо пропустится, но TraceLog в консоль сработает
+           (void)system("zenity --error --title='P1 Sandbox - Fatal Error' "
+                  "--text='Critical Error: " font_file_name " not found!\nPlease check that the assets directory is inside the project root folder.' 2>/dev/null");
+#endif
+           abort();
+       }
 
-            abort();
-        }
         // Опционально: включаем билинейную фильтрацию, чтобы края были идеально гладкими
         SetTextureFilter(g.font32.texture, TEXTURE_FILTER_BILINEAR);
         #undef  font_file_name

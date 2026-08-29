@@ -22,6 +22,3 @@ target_precompile_headers(p1 PRIVATE src/pch.h)
 
 # 4. Линкуем статическую библиотеку Raylib к проекту p1
 target_link_libraries(p1 PRIVATE raylib)
-
-# Помогает clangd гарантированно найти raylib.h
-target_include_directories(p1 PRIVATE C:/msys64/ucrt64/include)
