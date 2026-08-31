@@ -15,6 +15,7 @@ inline auto make_callback(R(*func)(T *, Args...))
 }
 
 
+
 struct Game;
 
 struct IGameState
@@ -71,26 +72,48 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
     }
 }
 
+struct Player {
+    int x, y;
+
+};
+
 inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
 {
+    Player player = { .x = 3, .y = 5 };
     auto &m = *self;
     ClearBackground(DARKBROWN);
 
     auto t = "Sandbox engine Проверка шрифта";
     int spacing = 0;
-    Vector2 pos{ 0, 20 };
+    Vector2 pos{ 0, 0 };
 
     auto draw_text = [&](const char* text, Font font) {
         // for(int i = 1; i <= 3; i++)
         // {
-            DrawTextEx(font, t, pos, font.baseSize, spacing, GREEN);
+            DrawTextEx(font, text, pos, font.baseSize, spacing, GREEN);
             pos.y += font.baseSize;
 
         // }
-    };
+    };/*
     draw_text(t, g.font8);
     draw_text(t, g.font16);
-    draw_text(t, g.font32);
+    draw_text(t, g.font32);*/
+    for(int x = 0; x < 10; x++){
+        for(int y = 0; y < 10; y++){
+            pos.x = x * g.font8.baseSize*8;
+            pos.y = y * g.font8.baseSize*8;
+            if(player.x == x && player.y == y) {
+                DrawTextEx(g.font8, "@", pos, g.font8.baseSize*8, spacing, GREEN);
+            }else
+            if(!x || !y || x >=9 || y >= 9) {
+                //draw_text("#", g.font8);
+                DrawTextEx(g.font8, "#", pos, g.font8.baseSize*8, spacing, GREEN);
+            }else{
+                 DrawTextEx(g.font8, ".", pos, g.font8.baseSize*8, spacing, GREEN);
+            }
+
+        }
+    }
 
 }
 
