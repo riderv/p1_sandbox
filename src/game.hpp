@@ -47,15 +47,19 @@ struct MainMenu
     IGameState state;
     Game *g;
     int zoom = 4;
+    enum { fonts_count = 4 };
+    Font *fonts[fonts_count];
+    int current_font = 0;
+
  };
 
 struct Game
 {
     IGameState state;
-    Font font32;
-    Font font16;
-    Font font8;
-
+    Font unscii8;
+    Font unscii8t;
+    Font unscii16;
+    Font JetBrainsMonoNL_SemiBold;
     MainMenu mMainMenu;
     bool running = true;
 };
@@ -64,6 +68,29 @@ inline void MainMenu_OnEnter(MainMenu *self, Game& g)
 {
 
 }
+
+
+struct Player {
+    int x, y;
+
+};
+
+inline Font* MainMenu_NextFont(MainMenu &m)
+{
+    m.current_font = ++m.current_font % m.fonts_count;
+    return m.fonts[m.current_font];
+}
+inline Font* MainMenu_PrevFont(MainMenu &m)
+{
+    if(--m.current_font < 0 ) m.current_font = m.fonts_count - 1;
+        return m.fonts[m.current_font];
+
+}
+inline Font* MainMenu_CurrentFont(MainMenu &m)
+{
+    return m.fonts[m.current_font];
+}
+
 
 inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
 {
@@ -76,47 +103,34 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
     }
     else if(IsKeyPressed(KEY_KP_SUBTRACT) || IsKeyPressed(KEY_MINUS)) {
         if(--m.zoom < 1) m.zoom = 1;
+    }else if(IsKeyPressed(KEY_PERIOD)) {
+        MainMenu_PrevFont(m);
+    }else if(IsKeyPressed(KEY_COMMA)) {
+        MainMenu_NextFont(m);
     }
 }
-
-struct Player {
-    int x, y;
-
-};
 
 inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
 {
     auto &m = *self;
-    Player player = { .x = 3, .y = 5 };
     ClearBackground(DARKBROWN);
+    Player player = { .x = 3, .y = 5 };
+    Vector2 pos = {0};
 
-    auto t = "Sandbox engine Проверка шрифта";
     int spacing = 0;
-    Vector2 pos{ 0, 0 };
-
-    auto draw_text = [&](const char* text, Font font) {
-        // for(int i = 1; i <= 3; i++)
-        // {
-            DrawTextEx(font, text, pos, font.baseSize, spacing, GREEN);
-            pos.y += font.baseSize;
-
-        // }
-    };/*
-    draw_text(t, g.font8);
-    draw_text(t, g.font16);
-    draw_text(t, g.font32);*/
+    Font *font = MainMenu_CurrentFont(m);
     for(int x = 0; x < 10; x++){
         for(int y = 0; y < 10; y++){
-            pos.x = x * g.font8.baseSize * m.zoom;
-            pos.y = y * g.font8.baseSize * m.zoom;
+            pos.x = x * font->baseSize * m.zoom;
+            pos.y = y * font->baseSize * m.zoom;
             if(player.x == x && player.y == y) {
-                DrawTextEx(g.font8, "@", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
+                DrawTextEx(*font, "@", pos, font->baseSize * m.zoom, spacing, GREEN);
             }else
             if(!x || !y || x >=9 || y >= 9) {
                 //draw_text("#", g.font8);
-                DrawTextEx(g.font8, "#", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
+                DrawTextEx(*font, "#", pos, font->baseSize * m.zoom, spacing, GREEN);
             }else{
-                 DrawTextEx(g.font8, ".", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
+                 DrawTextEx(*font, ".", pos, font->baseSize * m.zoom, spacing, GREEN);
             }
 
         }
@@ -135,7 +149,11 @@ inline void MainMenu_Init(MainMenu *self, Game& g)
     };
     m.state.obj = self;
     m.state.v = &v;
-
+    m.fonts[0] = &g.unscii8t;
+    m.fonts[1] = &g.unscii8;
+    m.fonts[2] = &g.unscii16;
+    m.fonts[3] = &g.JetBrainsMonoNL_SemiBold;
+    m.current_font = 1;
 }
 
 inline void MainMenu_ChangeState(Game& g, IGameState d)
@@ -181,15 +199,18 @@ inline void Game_LoadFonts(Game &g)
         }
         return font;
     };
-    g.font8 = load_font("assets/fonts/PressStart2P.ttf", 8);
-    SetTextureFilter(g.font8.texture, TEXTURE_FILTER_POINT);
+    g.unscii8 = load_font("assets/fonts/unscii-8-thin.ttf", 8);
+    SetTextureFilter(g.unscii8.texture, TEXTURE_FILTER_POINT);
 
-    g.font16 = load_font("assets/fonts/FSEX302.ttf", 16);
-    SetTextureFilter(g.font16.texture, TEXTURE_FILTER_POINT);
+    g.unscii8t = load_font("assets/fonts/unscii-8.ttf", 8);
+    SetTextureFilter(g.unscii8t.texture, TEXTURE_FILTER_POINT);
 
-    g.font32 = load_font("assets/fonts/JetBrainsMonoNL-SemiBold.ttf", 36);
-    GenTextureMipmaps(&g.font32.texture);
-    SetTextureFilter(g.font32.texture, TEXTURE_FILTER_ANISOTROPIC_16X);
+    g.unscii16 = load_font("assets/fonts/unscii-16.ttf", 16);
+    SetTextureFilter(g.unscii8t.texture, TEXTURE_FILTER_POINT);
+
+    g.JetBrainsMonoNL_SemiBold = load_font("assets/fonts/JetBrainsMonoNL-SemiBold.ttf", 36);
+    GenTextureMipmaps(&g.JetBrainsMonoNL_SemiBold.texture);
+    SetTextureFilter(g.JetBrainsMonoNL_SemiBold.texture, TEXTURE_FILTER_ANISOTROPIC_16X);
 
 }
 
@@ -214,7 +235,7 @@ inline void Game_Draw(Game& g)
 
 inline void Game_Shutdown(Game& g)
 {
-    UnloadFont(g.font8);
-    UnloadFont(g.font16);
-    UnloadFont(g.font32);
+    UnloadFont(g.unscii8);
+    UnloadFont(g.unscii8t);
+    UnloadFont(g.unscii16);
 }
