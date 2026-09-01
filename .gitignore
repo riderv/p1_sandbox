@@ -22,4 +22,6 @@ cmake_install.cmake
 *.pch
 *.gch
 
-*.dllp1
+*.dll
+
+p1

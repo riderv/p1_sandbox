@@ -46,6 +46,7 @@ struct MainMenu
 {
     IGameState state;
     Game *g;
+    int zoom = 4;
  };
 
 struct Game
@@ -70,6 +71,12 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
     if (IsKeyPressed(KEY_ESCAPE)) {
         g.running = false;
     }
+    else if(IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)){
+        m.zoom++;
+    }
+    else if(IsKeyPressed(KEY_KP_SUBTRACT) || IsKeyPressed(KEY_MINUS)) {
+        if(--m.zoom < 1) m.zoom = 1;
+    }
 }
 
 struct Player {
@@ -79,8 +86,8 @@ struct Player {
 
 inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
 {
-    Player player = { .x = 3, .y = 5 };
     auto &m = *self;
+    Player player = { .x = 3, .y = 5 };
     ClearBackground(DARKBROWN);
 
     auto t = "Sandbox engine Проверка шрифта";
@@ -100,16 +107,16 @@ inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
     draw_text(t, g.font32);*/
     for(int x = 0; x < 10; x++){
         for(int y = 0; y < 10; y++){
-            pos.x = x * g.font8.baseSize*8;
-            pos.y = y * g.font8.baseSize*8;
+            pos.x = x * g.font8.baseSize * m.zoom;
+            pos.y = y * g.font8.baseSize * m.zoom;
             if(player.x == x && player.y == y) {
-                DrawTextEx(g.font8, "@", pos, g.font8.baseSize*8, spacing, GREEN);
+                DrawTextEx(g.font8, "@", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
             }else
             if(!x || !y || x >=9 || y >= 9) {
                 //draw_text("#", g.font8);
-                DrawTextEx(g.font8, "#", pos, g.font8.baseSize*8, spacing, GREEN);
+                DrawTextEx(g.font8, "#", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
             }else{
-                 DrawTextEx(g.font8, ".", pos, g.font8.baseSize*8, spacing, GREEN);
+                 DrawTextEx(g.font8, ".", pos, g.font8.baseSize * m.zoom, spacing, GREEN);
             }
 
         }
