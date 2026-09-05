@@ -116,25 +116,37 @@ inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
     ClearBackground(DARKBROWN);
     Player player = { .x = 3, .y = 5 };
     Vector2 pos = {0};
+    int zm = 2;
+    float offsetX = 30, offsetY = 30;
+    Vector2 v1 = { 0.0f + offsetX, 0.0f + offsetY }; // Верхняя точка
+    Vector2 v2 = { 0.0f + offsetX, 10.0f*zm + offsetY }; // Нижняя левая точка
+    Vector2 v3 = { 10.0f*zm + offsetX, 10.0f*zm + offsetY }; // Нижняя правая точка
 
     int spacing = 0;
     Font *font = MainMenu_CurrentFont(m);
+    Color color = { 222,222,222, 255 };
     for(int x = 0; x < 10; x++){
         for(int y = 0; y < 10; y++){
             pos.x = x * font->baseSize * m.zoom;
             pos.y = y * font->baseSize * m.zoom;
             if(player.x == x && player.y == y) {
-                DrawTextEx(*font, "@", pos, font->baseSize * m.zoom, spacing, GREEN);
+                DrawTextEx(*font, "@", pos, font->baseSize * m.zoom, spacing, color);
             }else
             if(!x || !y || x >=9 || y >= 9) {
                 //draw_text("#", g.font8);
-                DrawTextEx(*font, "#", pos, font->baseSize * m.zoom, spacing, GREEN);
+                DrawTextEx(*font, "#", pos, font->baseSize * m.zoom, spacing, color);
+            }else if(x == 3 && y==3){
+                DrawTextEx(*font, "g", pos, font->baseSize * m.zoom, spacing, color);
+            }
+            else if(x == 7 && y == 6){
+                DrawTextEx(*font, "T", pos, font->baseSize * m.zoom, spacing, color);
             }else{
-                 DrawTextEx(*font, ".", pos, font->baseSize * m.zoom, spacing, GREEN);
+                 DrawTextEx(*font, ".", pos, font->baseSize * m.zoom, spacing, color);
             }
 
         }
     }
+    DrawTriangle(v1,v2,v3, GREEN);
 
 }
 
