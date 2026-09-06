@@ -22,3 +22,17 @@ target_precompile_headers(p1 PRIVATE src/pch.h)
 
 # 4. Линкуем статическую библиотеку Raylib к проекту p1
 target_link_libraries(p1 PRIVATE raylib)
+
+
+# =================================================================
+# Субпроект: Сниппет для превью шрифтов
+# =================================================================
+
+# 1. Объявляем отдельный исполняемый файл
+add_executable(font_preview snippets/font_preview.cpp)
+
+# 2. Применяем те же флаги компиляции (без исключений и RTTI)
+target_compile_options(font_preview PRIVATE -fno-exceptions -fno-rtti)
+
+# 3. Линкуем Raylib к этому сниппету
+target_link_libraries(font_preview PRIVATE raylib)

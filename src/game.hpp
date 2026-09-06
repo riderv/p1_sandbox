@@ -64,6 +64,16 @@ struct Game
     bool running = true;
 };
 
+struct WorldChunk
+{
+
+};
+
+struct World
+{
+
+};
+
 inline void MainMenu_OnEnter(MainMenu *self, Game& g)
 {
 
