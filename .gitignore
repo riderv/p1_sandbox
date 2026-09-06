@@ -25,3 +25,4 @@ cmake_install.cmake
 *.dll
 
 p1
+font_preview
