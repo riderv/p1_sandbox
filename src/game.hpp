@@ -103,11 +103,14 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
     }
     else if(IsKeyPressed(KEY_KP_SUBTRACT) || IsKeyPressed(KEY_MINUS)) {
         if(--m.zoom < 1) m.zoom = 1;
-    }else if(IsKeyPressed(KEY_PERIOD)) {
-        MainMenu_PrevFont(m);
-    }else if(IsKeyPressed(KEY_COMMA)) {
-        MainMenu_NextFont(m);
     }
+    else if(IsKeyPressed(KEY_PERIOD)) {
+            MainMenu_PrevFont(m);
+        }
+    else if(IsKeyPressed(KEY_COMMA)) {
+            MainMenu_NextFont(m);
+    }
+
 }
 
 inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
@@ -165,7 +168,7 @@ inline void MainMenu_Init(MainMenu *self, Game& g)
     m.fonts[1] = &g.unscii8;
     m.fonts[2] = &g.unscii16;
     m.fonts[3] = &g.JetBrainsMonoNL_SemiBold;
-    m.current_font = 1;
+
 }
 
 inline void MainMenu_ChangeState(Game& g, IGameState d)
@@ -179,7 +182,7 @@ inline void Game_LoadFonts(Game &g)
 {
     // 1. Создаем массив кодовых точек (ASCII + Кириллица)
     constexpr int codepoints_size = 512;
-    int codepoints[512] = { codepoints_size };
+    int codepoints[codepoints_size] = { 0 };
     for (int i = 0; i < 95; i++)  codepoints[i] = 32 + i;        // Латиница и знаки
     for (int i = 0; i < 255; i++) codepoints[96 + i] = 0x400 + i; // Кириллица (русские буквы)
 
@@ -222,7 +225,7 @@ inline void Game_LoadFonts(Game &g)
 
     g.JetBrainsMonoNL_SemiBold = load_font("assets/fonts/JetBrainsMonoNL-SemiBold.ttf", 36);
     GenTextureMipmaps(&g.JetBrainsMonoNL_SemiBold.texture);
-    SetTextureFilter(g.JetBrainsMonoNL_SemiBold.texture, TEXTURE_FILTER_ANISOTROPIC_16X);
+    SetTextureFilter(g.JetBrainsMonoNL_SemiBold.texture, TEXTURE_FILTER_BILINEAR);
 
 }
 
