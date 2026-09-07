@@ -50,6 +50,7 @@ struct MainMenu
     enum { fonts_count = 4 };
     Font *fonts[fonts_count];
     int current_font = 0;
+    int current_font_size = 16;
 
  };
 
@@ -140,21 +141,21 @@ inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
     Color color = { 222,222,222, 255 };
     for(int x = 0; x < 10; x++){
         for(int y = 0; y < 10; y++){
-            pos.x = x * font->baseSize * m.zoom;
-            pos.y = y * font->baseSize * m.zoom;
+            pos.x = x * m.current_font_size * m.zoom;
+            pos.y = y * m.current_font_size * m.zoom;
             if(player.x == x && player.y == y) {
-                DrawTextEx(*font, "@", pos, font->baseSize * m.zoom, spacing, color);
+                DrawTextEx(*font, "@", pos, m.current_font_size * m.zoom, spacing, color);
             }else
             if(!x || !y || x >=9 || y >= 9) {
                 //draw_text("#", g.font8);
-                DrawTextEx(*font, "#", pos, font->baseSize * m.zoom, spacing, color);
+                DrawTextEx(*font, "#", pos, m.current_font_size * m.zoom, spacing, color);
             }else if(x == 3 && y==3){
-                DrawTextEx(*font, "g", pos, font->baseSize * m.zoom, spacing, color);
+                DrawTextEx(*font, "g", pos, m.current_font_size * m.zoom, spacing, color);
             }
             else if(x == 7 && y == 6){
-                DrawTextEx(*font, "T", pos, font->baseSize * m.zoom, spacing, color);
+                DrawTextEx(*font, "T", pos, m.current_font_size * m.zoom, spacing, color);
             }else{
-                 DrawTextEx(*font, ".", pos, font->baseSize * m.zoom, spacing, color);
+                 DrawTextEx(*font, ".", pos, m.current_font_size * m.zoom, spacing, color);
             }
 
         }
