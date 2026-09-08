@@ -88,8 +88,14 @@ struct Player {
 
 
 // Функция для отрисовки символа, принудительно вписанного в заданный квадрат
-inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float boxSize, Color tint)
+inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float boxSize, Color tint, Color bgTint)
 {
+    // 1. Отрисовка бэкграунда (если он не прозрачный)
+    if (bgTint.a > 0) {
+        DrawRectangle((int)pos.x, (int)pos.y, (int)boxSize, (int)boxSize, bgTint);
+    }
+
+    // 2. Поиск индекса символа
     int index = GetGlyphIndex(font, codepoint);
 
     if (index < 0 || font.recs[index].width <= 0 || font.recs[index].height <= 0) {
@@ -105,26 +111,20 @@ inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float 
     float glyphWidth = (font.glyphs[index].advanceX == 0) ? srcRec.width : (float)font.glyphs[index].advanceX;
     float glyphHeight = (float)font.baseSize;
 
-    // АВТОМАТИЧЕСКИЙ ПАДДИНГ:
-    // Если базовый размер шрифта маленький (например, 8 для unscii), значит он растровый -> ставим 1 пиксель.
-    // Если шрифт большой (36+ для JetBrains) -> паддинг не нужен (0).
+    // Автоматический паддинг в зависимости от типа шрифта
     float padding = (font.baseSize <= 16) ? 1.0f : 0.0f;
 
-    // Рабочая зона внутри ячейки с учетом паддинга
     float usableBoxSizeX = boxSize - (padding * 2.0f);
     float usableBoxSizeY = boxSize - (padding * 2.0f);
 
     float scaleFactorY = usableBoxSizeY / glyphHeight;
-
-    // Для векторных шрифтов (где padding == 0) оставляем сужение 0.85f.
-    // Для растровых (где есть жесткий отступ 1px) можно использовать 1.0f, чтобы не плющить пиксели.
     float widthRatio = (padding > 0.0f) ? 1.0f : 0.85f;
     float scaleFactorX = (usableBoxSizeX * widthRatio) / glyphWidth;
 
     float valueOffsetX = font.glyphs[index].offsetX;
     float valueOffsetY = font.glyphs[index].offsetY;
 
-    // Центрирование символа
+    // Центрирование
     float remainingSpaceX = usableBoxSizeX - (glyphWidth * scaleFactorX);
     float remainingSpaceY = usableBoxSizeY - (glyphHeight * scaleFactorY);
 
@@ -141,6 +141,7 @@ inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float 
     Vector2 origin = { 0.0f, 0.0f };
     DrawTexturePro(font.texture, srcRec, destRec, origin, 0.0f, tint);
 }
+
 
 inline Font* MainMenu_NextFont(MainMenu &m)
 {
@@ -189,7 +190,7 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
     int spacing = 0; //
     Font *font = MainMenu_CurrentFont(m); //
     Color color = { 222, 222, 222, 255 }; //
-
+    Color bgTint = BLANK;
     // Вычисляем размер одного квадратного тайла в пикселях
     // Константный размер базового шрифта * зум
     float boxSize = m.current_font_size * m.zoom;
@@ -213,6 +214,7 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
             }
             else if (!x || !y || x >= 9 || y >= 9) { //
                 codepoint = '#';
+                bgTint = (Color){64,64,64,255};
             }
             else if (x == 3 && y == 3) { //
                 codepoint = 'g';
@@ -234,7 +236,8 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
             }
 
             // Рисуем символ строго в границах ячейки
-            DrawTextCodepointInBox(*font, codepoint, pos, boxSize, textColor);
+            DrawTextCodepointInBox(*font, codepoint, pos, boxSize, textColor, bgTint);
+            bgTint = BLACK;
         }
     }
 
