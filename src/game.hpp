@@ -46,7 +46,7 @@ struct MainMenu
 {
     IGameState state;
     Game *g;
-    int zoom = 4;
+    int zoom = 2;
     enum { fonts_count = 4 };
     Font *fonts[fonts_count];
     int current_font = 0;
@@ -86,6 +86,62 @@ struct Player {
 
 };
 
+
+// Функция для отрисовки символа, принудительно вписанного в заданный квадрат
+inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float boxSize, Color tint)
+{
+    int index = GetGlyphIndex(font, codepoint);
+
+    if (index < 0 || font.recs[index].width <= 0 || font.recs[index].height <= 0) {
+        index = GetGlyphIndex(font, '?');
+        if (index < 0 || font.recs[index].width <= 0 || font.recs[index].height <= 0) {
+            DrawRectangleLines((int)pos.x, (int)pos.y, (int)boxSize, (int)boxSize, RED);
+            return;
+        }
+    }
+
+    Rectangle srcRec = font.recs[index];
+
+    float glyphWidth = (font.glyphs[index].advanceX == 0) ? srcRec.width : (float)font.glyphs[index].advanceX;
+    float glyphHeight = (float)font.baseSize;
+
+    // АВТОМАТИЧЕСКИЙ ПАДДИНГ:
+    // Если базовый размер шрифта маленький (например, 8 для unscii), значит он растровый -> ставим 1 пиксель.
+    // Если шрифт большой (36+ для JetBrains) -> паддинг не нужен (0).
+    float padding = (font.baseSize <= 16) ? 1.0f : 0.0f;
+
+    // Рабочая зона внутри ячейки с учетом паддинга
+    float usableBoxSizeX = boxSize - (padding * 2.0f);
+    float usableBoxSizeY = boxSize - (padding * 2.0f);
+
+    float scaleFactorY = usableBoxSizeY / glyphHeight;
+
+    // Для векторных шрифтов (где padding == 0) оставляем сужение 0.85f.
+    // Для растровых (где есть жесткий отступ 1px) можно использовать 1.0f, чтобы не плющить пиксели.
+    float widthRatio = (padding > 0.0f) ? 1.0f : 0.85f;
+    float scaleFactorX = (usableBoxSizeX * widthRatio) / glyphWidth;
+
+    float valueOffsetX = font.glyphs[index].offsetX;
+    float valueOffsetY = font.glyphs[index].offsetY;
+
+    // Центрирование символа
+    float remainingSpaceX = usableBoxSizeX - (glyphWidth * scaleFactorX);
+    float remainingSpaceY = usableBoxSizeY - (glyphHeight * scaleFactorY);
+
+    float drawX = std::floor(pos.x + padding + (valueOffsetX * scaleFactorX) + (remainingSpaceX * 0.5f));
+    float drawY = std::floor(pos.y + padding + (valueOffsetY * scaleFactorY) + (remainingSpaceY * 0.5f));
+
+    Rectangle destRec = {
+        drawX,
+        drawY,
+        std::floor(srcRec.width * scaleFactorX),
+        std::floor(srcRec.height * scaleFactorY)
+    };
+
+    Vector2 origin = { 0.0f, 0.0f };
+    DrawTexturePro(font.texture, srcRec, destRec, origin, 0.0f, tint);
+}
+
 inline Font* MainMenu_NextFont(MainMenu &m)
 {
     m.current_font = ++m.current_font % m.fonts_count;
@@ -124,45 +180,73 @@ inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
 
 }
 
-inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
+ inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
 {
     auto &m = *self;
-    ClearBackground(DARKBROWN);
-    Player player = { .x = 3, .y = 5 };
-    Vector2 pos = {0};
-    int zm = 2;
-    float offsetX = 30, offsetY = 30;
-    Vector2 v1 = { 0.0f + offsetX, 0.0f + offsetY }; // Верхняя точка
-    Vector2 v2 = { 0.0f + offsetX, 10.0f*zm + offsetY }; // Нижняя левая точка
-    Vector2 v3 = { 10.0f*zm + offsetX, 10.0f*zm + offsetY }; // Нижняя правая точка
+    ClearBackground(DARKBROWN); //
 
-    int spacing = 0;
-    Font *font = MainMenu_CurrentFont(m);
-    Color color = { 222,222,222, 255 };
-    for(int x = 0; x < 10; x++){
-        for(int y = 0; y < 10; y++){
-            pos.x = x * m.current_font_size * m.zoom;
-            pos.y = y * m.current_font_size * m.zoom;
-            if(player.x == x && player.y == y) {
-                DrawTextEx(*font, "@", pos, m.current_font_size * m.zoom, spacing, color);
-            }else
-            if(!x || !y || x >=9 || y >= 9) {
-                //draw_text("#", g.font8);
-                DrawTextEx(*font, "#", pos, m.current_font_size * m.zoom, spacing, color);
-            }else if(x == 3 && y==3){
-                DrawTextEx(*font, "g", pos, m.current_font_size * m.zoom, spacing, color);
+    Player player = { .x = 3, .y = 4 }; //
+    int spacing = 0; //
+    Font *font = MainMenu_CurrentFont(m); //
+    Color color = { 222, 222, 222, 255 }; //
+
+    // Вычисляем размер одного квадратного тайла в пикселях
+    // Константный размер базового шрифта * зум
+    float boxSize = m.current_font_size * m.zoom;
+
+    for (int x = 0; x < 10; x++) { //
+        for (int y = 0; y < 10; y++) { //
+
+            // Позиция левого верхнего угла нашей плитки (тайла)
+            Vector2 pos = {
+                x * boxSize,
+                y * boxSize
+            };
+
+            // Определяем, какой символ (кодопоинт) рисовать в этой ячейке
+            int codepoint = '.';
+            Color textColor = color;
+
+            if (player.x == x && player.y == y) { //
+                codepoint = '@';
+                textColor = YELLOW; // подсветим игрока
             }
-            else if(x == 7 && y == 6){
-                DrawTextEx(*font, "T", pos, m.current_font_size * m.zoom, spacing, color);
-            }else{
-                 DrawTextEx(*font, ".", pos, m.current_font_size * m.zoom, spacing, color);
+            else if (!x || !y || x >= 9 || y >= 9) { //
+                codepoint = '#';
+            }
+            else if (x == 3 && y == 3) { //
+                codepoint = 'g';
+            }
+            else if (x == 3 && y == 5) { //
+                codepoint = 'T';
+            }
+            else if(x == 4 && y == 4) {
+                codepoint = 'T';
+            }
+            else if(x==2 && y == 4) {
+                codepoint = 'H';
             }
 
+            // Тест фоллбэка: попробуем вывести символ, которого точно нет в ASCII
+            // (например, какой-нибудь японский иероглиф или битый код 0)
+            if (x == 5 && y == 5) {
+                codepoint = 0x4E00; // Этот символ превратится в '?' или в DrawRectangleLines
+            }
+
+            // Рисуем символ строго в границах ячейки
+            DrawTextCodepointInBox(*font, codepoint, pos, boxSize, textColor);
         }
     }
-    DrawTriangle(v1,v2,v3, GREEN);
 
+    // Отрисовка вашего тестового треугольника поверх
+    float offsetX = 30, offsetY = 30; //
+    int zm = 2; //
+    Vector2 v1 = { 0.0f + offsetX, 0.0f + offsetY }; //
+    Vector2 v2 = { 0.0f + offsetX, 10.0f*zm + offsetY }; //
+    Vector2 v3 = { 10.0f*zm + offsetX, 10.0f*zm + offsetY }; //
+    DrawTriangle(v1, v2, v3, GREEN); //
 }
+
 
 inline void MainMenu_Init(MainMenu *self, Game& g)
 {
@@ -234,9 +318,9 @@ inline void Game_LoadFonts(Game &g)
     g.unscii16 = load_font("assets/fonts/unscii-16.ttf", 16);
     SetTextureFilter(g.unscii8t.texture, TEXTURE_FILTER_POINT);
 
-    g.JetBrainsMonoNL_SemiBold = load_font("assets/fonts/JetBrainsMonoNL-SemiBold.ttf", 36);
+    g.JetBrainsMonoNL_SemiBold = load_font("assets/fonts/JetBrainsMonoNL-SemiBold.ttf", 64);
     GenTextureMipmaps(&g.JetBrainsMonoNL_SemiBold.texture);
-    SetTextureFilter(g.JetBrainsMonoNL_SemiBold.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(g.JetBrainsMonoNL_SemiBold.texture, TEXTURE_FILTER_TRILINEAR);
 
 }
 

@@ -6,3 +6,4 @@
 
 #include "talloc.h"
 
+#include <cmath>
