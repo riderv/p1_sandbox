@@ -38,27 +38,49 @@ struct MainMenu: IGameState
  };
 
 
-struct TileDef {
-    int codepoint;
-    Color fgColor;
-    Color bgColor;
-    bool isSolid;
-};
 
-enum TileId : uint8_t {
-    TILE_AIR = 0,
-    TILE_FLOOR = 1,
-    TILE_WALL = 2,
-    TILE_WATER = 3,
-    TILE_COUNT
-};
+ enum TileDescId : uint8_t {
+     DESC_AIR,
+     DESC_FLOOR,
+     DESC_WALL,
+     DESC_WATER,
+     DESC_DOOR,
+     DESC_COUNT
+ };
 
-inline const TileDef TILE_DATABASE[TILE_COUNT] = {
-    /*[TILE_AIR  ] =*/ { ' ', BLANK, BLANK, false },
-    /*[TILE_FLOOR] =*/ { '.', { 150, 150, 150, 255 }, BLANK, false },
-    /*[TILE_WALL]  =*/ { '#', LIGHTGRAY, DARKGRAY, true },
-    /*[TILE_WATER] =*/ { '~', BLUE, DARKBLUE, false }
-};
+ inline const char* TILE_DESCRIPTIONS[DESC_COUNT] = {
+     "Пустота / Воздух",
+     "Пол / Земля",
+     "Стена / Камень",
+     "Глубокая Вода",
+     "Деревянная Дверь"
+ };
+
+ struct TileDef {
+     int codepoint;
+     Color fgColor;
+     Color bgColor;
+     bool isSolid;
+     TileDescId descId; // Связь со справочником строк
+ };
+
+ enum TileId : uint8_t {
+     TILE_AIR = 0,
+     TILE_FLOOR = 1,
+     TILE_WALL = 2,
+     TILE_WATER = 3,
+     TILE_DOOR = 4, // Добавили дверь
+     TILE_COUNT
+ };
+
+ inline const TileDef TILE_DATABASE[TILE_COUNT] = {
+     { ' ', BLANK, BLANK, false, DESC_AIR },
+     { '.', { 150, 150, 150, 255 }, BLANK, false, DESC_FLOOR },
+     { '#', LIGHTGRAY, DARKGRAY, true, DESC_WALL },
+     { '~', BLUE, DARKBLUE, false, DESC_WATER },
+     { '+', BROWN, { 80, 50, 20, 255 }, true, DESC_DOOR } // Новая дверь!
+ };
+
 
 // Проверка времени компиляции (работает без исключений и RTTI)
 static_assert(sizeof(TILE_DATABASE) / sizeof(TileDef) == TILE_COUNT,
@@ -88,6 +110,22 @@ struct GameMap {
             }
         }
     }
+    bool saveToFile(const char* filename) const noexcept {
+        unsigned int dataSize = static_cast<unsigned int>(tileIds.size());
+        return SaveFileData(filename, const_cast<uint8_t*>(tileIds.data()), dataSize);
+    }
+    bool loadFromFile(const char* filename) noexcept {
+        int bytesRead = 0;
+        uint8_t* loadedData = LoadFileData(filename, &bytesRead);
+        if (!loadedData || bytesRead != tileIds.size()) {
+            if (loadedData) UnloadFileData(loadedData);
+            return false;
+        }
+        std::memcpy(tileIds.data(), loadedData, bytesRead);
+        UnloadFileData(loadedData);
+        return true;
+    }
+
 };
 
 
@@ -220,6 +258,7 @@ inline void MainMenu::OnUpdate(Game& g, float dt)
     else if(IsKeyPressed(KEY_ONE)) {
         if(selectedItem == 1) {
             g.ChangeState(&g.mMapEditor);
+            g.worldMap.loadFromFile("map.dat");
         }else{
             selectedItem = 1;
             setHint(press_again_hint);
@@ -365,6 +404,7 @@ inline void Game::Draw(float dt) const
 inline void MapEditor::OnUpdate(Game& g, float dt) {
     // 1. Выход из редактора по Ctrl+Q
     if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q)) {
+        g.worldMap.saveToFile("map.dat"); // Автосейв при выходе
         g.ChangeState(&g.mMainMenu);
         return;
     }
@@ -503,10 +543,9 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
             Vector2 iconPos = { (float)winX + 30, itemY };
             DrawTextCodepointInBox(g.unscii16, TILE_DATABASE[i].codepoint, iconPos, 16.0f, TILE_DATABASE[i].fgColor, TILE_DATABASE[i].bgColor);
 
-            // Текст пункта: [Буква] - Название
+            // Текст пункта: [Буква] - Название берем из справочника строк
             char itemBuf[256];
-            const char* tileNames[TILE_COUNT] = { "Пустота / Воздух", "Пол / Земля", "Стена / Камень", "Глубокая Вода" };
-            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, tileNames[i]);
+            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, TILE_DESCRIPTIONS[TILE_DATABASE[i].descId]);
 
             DrawTextEx(g.unscii16, itemBuf, { (float)winX + 65, itemY }, 16, 0, itemColor);
         }

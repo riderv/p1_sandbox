@@ -10,3 +10,4 @@
 #include <cstdint>
 #include <array>
 using std::array;
+#include <cstring>
