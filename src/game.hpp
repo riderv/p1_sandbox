@@ -92,13 +92,17 @@ struct GameMap {
 
 
 
-class MapEditor : public IGameState {
-private:
+struct MapEditor:  IGameState
+{
     int cursorX = 0;
     int cursorY = 0;
     uint8_t selectedTileId = TILE_WALL;
 
-public:
+    // Состояния для палитры (клавиша Ё / `)
+    bool isPaletteOpen = false;
+    int selectedPaletteIdx = 0;
+    int lastSelectedPaletteIdx = -1; // Для отслеживания двойного клика Nikon-style
+
     void OnUpdate(Game& g, float dt) override;
     void OnDraw(const Game& g, float dt) override;
 };
@@ -358,100 +362,165 @@ inline void Game::Draw(float dt) const
     state->OnDraw(*this, dt);
 }
 
+inline void MapEditor::OnUpdate(Game& g, float dt) {
+    // 1. Выход из редактора по Ctrl+Q
+    if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q)) {
+        g.ChangeState(&g.mMainMenu);
+        return;
+    }
 
-void MapEditor::OnDraw(const Game& g, float dt)
+    // 2. Логика работы с ПАЛИТРОЙ (клавиша Ё / `)
+    if (IsKeyPressed(KEY_GRAVE)) {
+        isPaletteOpen = !isPaletteOpen;
+        if (isPaletteOpen) {
+            lastSelectedPaletteIdx = -1;
+            selectedPaletteIdx = selectedTileId;
+        }
+    }
+
+    if (isPaletteOpen) {
+        // Каждому тайлу соответствует своя буква: 0->A, 1->B, 2->C, 3->D...
+        for (int i = 0; i < TILE_COUNT; ++i) {
+            int keyCheck = KEY_A + i;
+            if (IsKeyPressed(keyCheck)) {
+                if (selectedPaletteIdx == i && lastSelectedPaletteIdx == i) {
+                    // НАЖАТО ДВАЖДЫ (Nikon-Style) — подтверждаем и закрываем палитру
+                    selectedTileId = static_cast<uint8_t>(i);
+                    isPaletteOpen = false;
+                } else {
+                    // ПЕРВОЕ НАЖАТИЕ — просто выбираем пункт и ждем повтора
+                    selectedPaletteIdx = i;
+                    lastSelectedPaletteIdx = i;
+                }
+                break;
+            }
+        }
+        return; // Пока открыта палитра, рисовать на карте нельзя
+    }
+
+    // 3. СТАНДАРТНОЕ РИСОВАНИЕ МЫШЬЮ
+    float boxSize = g.current_font_size * g.zoom;
+    Vector2 mousePos = GetMousePosition();
+
+    if (mousePos.x >= 0 && mousePos.x < GetScreenWidth() &&
+        mousePos.y >= 0 && mousePos.y < GetScreenHeight())
+    {
+        int mouseTileX = (int)(mousePos.x / boxSize);
+        int mouseTileY = (int)(mousePos.y / boxSize);
+
+        if (mouseTileX >= 0 && mouseTileX < GameMap::Width &&
+            mouseTileY >= 0 && mouseTileY < GameMap::Height)
+        {
+            cursorX = mouseTileX;
+            cursorY = mouseTileY;
+
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                g.worldMap.set(cursorX, cursorY, selectedTileId);
+            }
+            else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                g.worldMap.set(cursorX, cursorY, 1); // Стираем в TILE_FLOOR
+            }
+        }
+    }
+
+    // Хоткеи 1, 2, 3 на панели как быстрая альтернатива мыши
+    if (IsKeyPressed(KEY_ONE))   selectedTileId = 1;
+    if (IsKeyPressed(KEY_TWO))   selectedTileId = 2;
+    if (IsKeyPressed(KEY_THREE)) selectedTileId = 3;
+}
+
+
+
+inline void MapEditor::OnDraw(const Game& g, float dt)
 {
     ClearBackground(BLACK);
 
-    // Вычисляем размер ячейки на основе текущего зума игры
     float boxSize = g.current_font_size * g.zoom;
 
-    // Текстовый LOD: подбираем шрифт под масштаб
+    // Автовыбор шрифта для карты мира (LOD)
     Font fontToUse = g.JetBrainsMonoNL_SemiBold;
     if (boxSize < 24.0f) {
-        fontToUse = g.unscii8t; // Используем базовый растровый шрифт
+        fontToUse = g.unscii8; // Растровый unscii-8-thin из вашего кода
     }
 
-    // 1. Отрисовка сетки карты мира
+    // 1. Отрисовка карты мира
     for (int y = 0; y < GameMap::Height; y++) {
         for (int x = 0; x < GameMap::Width; x++) {
             Vector2 pos = { x * boxSize, y * boxSize };
-
-            // Оптимизация: не шлем команды видеокарте, если тайл гарантированно за экраном
             if (pos.x < GetScreenWidth() && pos.y < GetScreenHeight()) {
                 uint8_t tileId = g.worldMap.get(x, y);
                 const TileDef& def = TILE_DATABASE[tileId];
-
                 DrawTextCodepointInBox(fontToUse, def.codepoint, pos, boxSize, def.fgColor, def.bgColor);
             }
         }
     }
 
-    // 2. Отрисовка курсора редактора (мигающая или полупрозрачная рамка)
+    // 2. ОТРИСОВКА ФАНТОМНОЙ КИСТИ И КУРСОРA
     Vector2 cursorRemarksPos = { cursorX * boxSize, cursorY * boxSize };
+    const TileDef& currentBrush = TILE_DATABASE[selectedTileId];
 
-    // Для эффекта мигания используем синус от времени
-    float alpha = (sinf(GetTime() * 8.0f) + 1.0f) * 0.5f; // значение от 0.0 до 1.0
-    Color cursorColor = Fade(YELLOW, 0.3f + alpha * 0.5f);
+    // Превью символа прямо под курсором мыши перед кликом
+    if (!isPaletteOpen) {
+        Color previewColor = currentBrush.fgColor;
+        previewColor.a = 150;
+        Color previewBg = currentBrush.bgColor;
+        if (previewBg.a > 0) previewBg.a = 100;
 
-    // Рисуем сплошной полупрозрачный бокс на месте курсора, чтобы выделить ячейку
-    DrawRectangle((int)cursorRemarksPos.x, (int)cursorRemarksPos.y, (int)boxSize, (int)boxSize, Fade(WHITE, 0.2f));
-    DrawRectangleLines((int)cursorRemarksPos.x, (int)cursorRemarksPos.y, (int)boxSize, (int)boxSize, cursorColor);
-
-    // 3. Небольшой статус-бар внизу экрана с информацией
-    int screenH = GetScreenHeight();
-    DrawRectangle(0, screenH - 25, GetScreenWidth(), 25, Fade(BLACK, 0.8f));
-
-    const TileDef& currentTileDef = TILE_DATABASE[selectedTileId];
-    char statusBuf[128];
-    snprintf(statusBuf, sizeof(statusBuf), "X: %d, Y: %d | Кисть: %c | ESC: Выход | 1-3: Выбор тайла | ЛКМ/Пробел: Рисовать",
-             cursorX, cursorY, currentTileDef.codepoint);
-
-    DrawText(statusBuf, 10, screenH - 20, 12, RAYWHITE);
-}
-
-inline void MapEditor::OnUpdate(Game& g, float dt) {
-    // 1. Возврат в меню на ESC
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        g.ChangeState(&g.mMainMenu);
-        return;
+        DrawTextCodepointInBox(fontToUse, currentBrush.codepoint, cursorRemarksPos, boxSize, previewColor, previewBg);
     }
 
-    // Вычисляем текущий размер ячейки тайла на экране
-    float boxSize = g.current_font_size * g.zoom;
+    // Рамка курсора с мягким миганием
+    float alpha = (sinf(GetTime() * 8.0f) + 1.0f) * 0.5f;
+    DrawRectangleLines((int)cursorRemarksPos.x, (int)cursorRemarksPos.y, (int)boxSize, (int)boxSize, Fade(YELLOW, 0.4f + alpha * 0.4f));
 
-    // 2. УПРАВЛЕНИЕ МЫШЬЮ (Перевод пикселей экрана в координаты сетки)
-    Vector2 mousePos = GetMousePosition();
+    // 3. ИНТЕРФЕЙС ПАЛИТРЫ (ШРИФТ UNSCII-16)
+    if (isPaletteOpen) {
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.5f));
 
-    // Проверяем, находится ли мышь вообще в пределах игрового окна
-    if (mousePos.x >= 0 && mousePos.x < GetScreenWidth() &&
-        mousePos.y >= 0 && mousePos.y < GetScreenHeight())
-    {
-        // Магия деления: переводим пиксели в координаты тайла (0..79 и 0..44)
-        int mouseTileX = (int)(mousePos.x / boxSize);
-        int mouseTileY = (int)(mousePos.y / boxSize);
+        int winW = 450;
+        int winH = 220;
+        int winX = (GetScreenWidth() - winW) / 2;
+        int winY = (GetScreenHeight() - winH) / 2;
 
-        // Защита от выхода за границы массива карт (на случай ресайза окна)
-        if (mouseTileX >= 0 && mouseTileX < GameMap::Width &&
-            mouseTileY >= 0 && mouseTileY < GameMap::Height)
-        {
-            // Курсор редактора послушно следует за мышкой!
-            cursorX = mouseTileX;
-            cursorY = mouseTileY;
+        DrawRectangle(winX, winY, winW, winH, { 30, 30, 30, 240 });
+        DrawRectangleLines(winX, winY, winW, winH, GRAY);
 
-            // Если зажат ЛКМ (Левая Кнопка Мыши) — рисуем выбранным тайлом
-            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                g.worldMap.set(cursorX, cursorY, selectedTileId);
+        // Красивый заголовок на русском
+        DrawTextEx(g.unscii16, "ПАЛИТРА БЛОКОВ (Ё)", { (float)winX + 20, (float)winY + 15 }, 16, 0, YELLOW);
+
+        // Список доступных тайлов
+        for (int i = 0; i < TILE_COUNT; ++i) {
+            float itemY = winY + 50 + i * 25;
+            Color itemColor = WHITE;
+
+            if (i == selectedPaletteIdx) {
+                // Если выбрано один раз — оранжевый, если подтверждено/повторно — зеленый
+                itemColor = (i == lastSelectedPaletteIdx) ? ORANGE : GREEN;
+                DrawRectangle(winX + 15, itemY - 2, winW - 30, 20, Fade(itemColor, 0.2f));
             }
-            // Если зажат ПКМ (Правая Кнопка Мыши) — стираем (ставим пол или воздух)
-            else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-                g.worldMap.set(cursorX, cursorY, TILE_FLOOR);
-            }
+
+            // Рисуем иконку тайла в палитре
+            Vector2 iconPos = { (float)winX + 30, itemY };
+            DrawTextCodepointInBox(g.unscii16, TILE_DATABASE[i].codepoint, iconPos, 16.0f, TILE_DATABASE[i].fgColor, TILE_DATABASE[i].bgColor);
+
+            // Текст пункта: [Буква] - Название
+            char itemBuf[256];
+            const char* tileNames[TILE_COUNT] = { "Пустота / Воздух", "Пол / Земля", "Стена / Камень", "Глубокая Вода" };
+            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, tileNames[i]);
+
+            DrawTextEx(g.unscii16, itemBuf, { (float)winX + 65, itemY }, 16, 0, itemColor);
         }
+
+        DrawTextEx(g.unscii16, "Нажмите букву дважды для подтверждения", { (float)winX + 20, (float)winY + winH - 25 }, 16, 0, GRAY);
     }
 
-    // 3. УПРАВЛЕНИЕ КЛАВИАТУРОЙ (Выбор кисти для рисования)
-    if (IsKeyPressed(KEY_ONE))   selectedTileId = TILE_FLOOR;
-    if (IsKeyPressed(KEY_TWO))   selectedTileId = TILE_WALL;
-    if (IsKeyPressed(KEY_THREE)) selectedTileId = TILE_WATER;
+    // 4. СТАТУС-БАР В САМОМ НИЗУ ЭКРАНА (ШРИФТ UNSCII-8)
+    int screenH = GetScreenHeight();
+    DrawRectangle(0, screenH - 20, GetScreenWidth(), 20, { 20, 20, 20, 255 });
+
+    char statusBuf[256];
+    snprintf(statusBuf, sizeof(statusBuf), "Координаты: [%d, %d] | Кисть: [%c] | Палитра: [~] | Выход: [Ctrl+Q]",
+             cursorX, cursorY, currentBrush.codepoint);
+
+    DrawTextEx(g.unscii8, statusBuf, { 10, (float)screenH - 14 }, 8, 0, RAYWHITE);
 }
