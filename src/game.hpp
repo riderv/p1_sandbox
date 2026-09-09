@@ -37,15 +37,6 @@ struct MainMenu: IGameState
     void setHint(const char* hint) { this->hint = hint; }
  };
 
-struct RenderDef {
-    int codepoint;
-    Color fgColor;
-    Color bgColor;
-};
-
-struct PhysicsDef {
-    bool isSolid;
-};
 
  enum TileId : uint8_t {
      TILE_AIR,
@@ -56,13 +47,25 @@ struct PhysicsDef {
      TILE_COUNT
  };
 
+ struct RenderDef {
+     int codepoint;
+     Color fgColor;
+     Color bgColor;
+ };
+
 inline const RenderDef TILE_RENDER[TILE_COUNT] = {
-    { ' ', BLANK, BLANK },
-    { '.', { 150, 150, 150, 255 }, BLANK },
-    { '#', LIGHTGRAY, DARKGRAY },
-    { '~', BLUE, DARKBLUE },
-    { '+', BROWN, { 80, 50, 20, 255 } },
+//codepoint,    fgColor,    bgColor
+    { ' ',      BLANK,      BLANK }, //TILE_AIR
+    { '.',      { 150, 150, 150, 255 }, BLANK }, //TILE_FLOOR
+    { '#',      LIGHTGRAY,  DARKGRAY }, //TILE_WALL
+    { '~',      BLUE,       DARKBLUE }, //TILE_WATER
+    { '+',      BROWN,      { 80, 50, 20, 255 } }, //TILE_DOOR
 };
+
+
+ struct PhysicsDef {
+     bool isSolid;
+ };
 
  inline const PhysicsDef TILE_PHYSICS[TILE_COUNT] = {
      { .isSolid = false }, //TILE_AIR
@@ -486,7 +489,7 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
     // Автовыбор шрифта для карты мира (LOD)
     Font fontToUse = g.JetBrainsMonoNL_SemiBold;
     if (boxSize < 24.0f) {
-        fontToUse = g.unscii8; // Растровый unscii-8-thin из вашего кода
+        fontToUse = g.unscii8; // Растровый unscii-8 из вашего кода
     }
 
     // 1. Отрисовка карты мира
