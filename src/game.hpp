@@ -37,18 +37,43 @@ struct MainMenu: IGameState
     void setHint(const char* hint) { this->hint = hint; }
  };
 
+struct RenderDef {
+    int codepoint;
+    Color fgColor;
+    Color bgColor;
+};
 
+struct PhysicsDef {
+    bool isSolid;
+};
 
- enum TileDescId : uint8_t {
-     DESC_AIR,
-     DESC_FLOOR,
-     DESC_WALL,
-     DESC_WATER,
-     DESC_DOOR,
-     DESC_COUNT
+ enum TileId : uint8_t {
+     TILE_AIR,
+     TILE_FLOOR,
+     TILE_WALL,
+     TILE_WATER,
+     TILE_DOOR,
+     TILE_COUNT
  };
 
- inline const char* TILE_DESCRIPTIONS[DESC_COUNT] = {
+inline const RenderDef TILE_RENDER[TILE_COUNT] = {
+    { ' ', BLANK, BLANK },
+    { '.', { 150, 150, 150, 255 }, BLANK },
+    { '#', LIGHTGRAY, DARKGRAY },
+    { '~', BLUE, DARKBLUE },
+    { '+', BROWN, { 80, 50, 20, 255 } },
+};
+
+ inline const PhysicsDef TILE_PHYSICS[TILE_COUNT] = {
+     { .isSolid = false }, //TILE_AIR
+     { .isSolid = false }, //TILE_FLOOR
+     { .isSolid = true },  //TILE_WALL
+     { .isSolid = false }, //TILE_WATER
+     { .isSolid = true },  //TILE_DOOR
+};
+
+
+ inline const char* TILE_DESC_STRINGS[TILE_COUNT] = {
      "Пустота / Воздух",
      "Пол / Земля",
      "Стена / Камень",
@@ -56,35 +81,14 @@ struct MainMenu: IGameState
      "Деревянная Дверь"
  };
 
- struct TileDef {
-     int codepoint;
-     Color fgColor;
-     Color bgColor;
-     bool isSolid;
-     TileDescId descId; // Связь со справочником строк
- };
+ static_assert(sizeof(TILE_RENDER) / sizeof(RenderDef) == TILE_COUNT, "Забыл RenderDef!");
+ static_assert(sizeof(TILE_PHYSICS) / sizeof(PhysicsDef) == TILE_COUNT, "Забыл PhysicsDef!");
+ static_assert(sizeof(TILE_DESC_STRINGS) / sizeof(char*) == TILE_COUNT, "Забыл описание тайла!");
 
- enum TileId : uint8_t {
-     TILE_AIR = 0,
-     TILE_FLOOR = 1,
-     TILE_WALL = 2,
-     TILE_WATER = 3,
-     TILE_DOOR = 4, // Добавили дверь
-     TILE_COUNT
- };
+ inline const char* GetTileDescription(TileId id) noexcept {
+     return TILE_DESC_STRINGS[id];
+ }
 
- inline const TileDef TILE_DATABASE[TILE_COUNT] = {
-     { ' ', BLANK, BLANK, false, DESC_AIR },
-     { '.', { 150, 150, 150, 255 }, BLANK, false, DESC_FLOOR },
-     { '#', LIGHTGRAY, DARKGRAY, true, DESC_WALL },
-     { '~', BLUE, DARKBLUE, false, DESC_WATER },
-     { '+', BROWN, { 80, 50, 20, 255 }, true, DESC_DOOR } // Новая дверь!
- };
-
-
-// Проверка времени компиляции (работает без исключений и RTTI)
-static_assert(sizeof(TILE_DATABASE) / sizeof(TileDef) == TILE_COUNT,
-              "Забыл добавить тайл в TILE_DATABASE!");
 
 struct GameMap {
     static constexpr int Width = 80;
@@ -467,6 +471,8 @@ inline void MapEditor::OnUpdate(Game& g, float dt) {
     if (IsKeyPressed(KEY_ONE))   selectedTileId = 1;
     if (IsKeyPressed(KEY_TWO))   selectedTileId = 2;
     if (IsKeyPressed(KEY_THREE)) selectedTileId = 3;
+    if (IsKeyPressed(KEY_FOUR)) selectedTileId = 4;
+
 }
 
 
@@ -489,15 +495,15 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
             Vector2 pos = { x * boxSize, y * boxSize };
             if (pos.x < GetScreenWidth() && pos.y < GetScreenHeight()) {
                 uint8_t tileId = g.worldMap.get(x, y);
-                const TileDef& def = TILE_DATABASE[tileId];
-                DrawTextCodepointInBox(fontToUse, def.codepoint, pos, boxSize, def.fgColor, def.bgColor);
-            }
+                const RenderDef& rdef = TILE_RENDER[tileId];
+                DrawTextCodepointInBox(fontToUse, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+              }
         }
     }
 
     // 2. ОТРИСОВКА ФАНТОМНОЙ КИСТИ И КУРСОРA
     Vector2 cursorRemarksPos = { cursorX * boxSize, cursorY * boxSize };
-    const TileDef& currentBrush = TILE_DATABASE[selectedTileId];
+    const RenderDef& currentBrush = TILE_RENDER[selectedTileId];
 
     // Превью символа прямо под курсором мыши перед кликом
     if (!isPaletteOpen) {
@@ -541,11 +547,10 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
 
             // Рисуем иконку тайла в палитре
             Vector2 iconPos = { (float)winX + 30, itemY };
-            DrawTextCodepointInBox(g.unscii16, TILE_DATABASE[i].codepoint, iconPos, 16.0f, TILE_DATABASE[i].fgColor, TILE_DATABASE[i].bgColor);
+            DrawTextCodepointInBox(g.unscii16, TILE_RENDER[i].codepoint, iconPos, 16.0f, TILE_RENDER[i].fgColor, TILE_RENDER[i].bgColor);
 
-            // Текст пункта: [Буква] - Название берем из справочника строк
             char itemBuf[256];
-            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, TILE_DESCRIPTIONS[TILE_DATABASE[i].descId]);
+            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, GetTileDescription(static_cast<TileId>(i)));
 
             DrawTextEx(g.unscii16, itemBuf, { (float)winX + 65, itemY }, 16, 0, itemColor);
         }
