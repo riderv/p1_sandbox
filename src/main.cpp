@@ -18,9 +18,10 @@ int main()
     Game_Init(game);
     while (!WindowShouldClose() && game.running)
     {
-        Game_Update(game);
+        float dt = GetFrameTime();
+        game.Update(dt);
         BeginDrawing();
-        Game_Draw(game);
+        game.Draw(dt);
         EndDrawing();
 
     }

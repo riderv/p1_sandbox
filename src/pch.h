@@ -7,3 +7,6 @@
 #include "talloc.h"
 
 #include <cmath>
+#include <cstdint>
+#include <array>
+using std::array;

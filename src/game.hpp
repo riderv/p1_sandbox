@@ -20,66 +20,142 @@ struct Game;
 
 struct IGameState
 {
-    void *obj = 0;
-    struct Vtbl {
-        void (*OnEnter)(void* obj, Game& g) = [](void*, Game&){};
-        void (*OnLeave)(void* obj, Game& g) = [](void*, Game&){};
-        void (*OnUpdate)(void* obj, Game& g, float dt) = [](void*, Game&, float){};
-        void (*OnDraw)(void* obj, const Game& g, float dt) = [](void*, const Game&, float){};
-    };
-    static Vtbl default_vtbl;
-    Vtbl *v = &default_vtbl;
-    //syntax sugar
-    void OnUpdate(Game& g, float dt) { v->OnUpdate(obj, g, dt); }
-    void OnDraw(const Game& g, float dt) { v->OnDraw(obj, g, dt); }
-    void OnEnter(Game &g) { v->OnEnter(obj, g); }
-    void OnLeave(Game& g) { v->OnLeave(obj, g); }
+    virtual ~IGameState() = default;
+    virtual void OnUpdate(Game& g, float dt) {} ;
+    virtual void OnDraw(const Game& g, float dt) {};
+    virtual void OnEnter(Game &g) {}
+    virtual void OnLeave(Game& g) {}
 };
-inline IGameState::Vtbl IGameState::default_vtbl{};
 
-// inline void GameState_OnUpdate(IGameState *s, Game& g, float dt)
-// {
-//     s->v->OnUpdate(s->obj, g, dt);
-// }
-
-struct MainMenu
+struct MainMenu: IGameState
 {
-    IGameState state;
     Game *g;
+    int selectedItem = -1;
+    const char* hint = "";
+    void OnUpdate(Game& g, float dt) override;
+    void OnDraw(const Game& g, float dt) override;
+    void setHint(const char* hint) { this->hint = hint; }
+ };
+
+
+struct TileDef {
+    int codepoint;
+    Color fgColor;
+    Color bgColor;
+    bool isSolid;
+};
+
+enum TileId : uint8_t {
+    TILE_AIR = 0,
+    TILE_FLOOR = 1,
+    TILE_WALL = 2,
+    TILE_WATER = 3,
+    TILE_COUNT
+};
+
+inline const TileDef TILE_DATABASE[TILE_COUNT] = {
+    [TILE_AIR]   = { ' ', BLANK, BLANK, false },
+    [TILE_FLOOR] = { '.', { 150, 150, 150, 255 }, BLANK, false },
+    [TILE_WALL]  = { '#', LIGHTGRAY, DARKGRAY, true },
+    [TILE_WATER] = { '~', BLUE, DARKBLUE, false }
+};
+
+struct GameMap {
+    static constexpr int Width = 80;
+    static constexpr int Height = 45;
+
+    // Карта весит ВСЕГО 3600 байт (80 * 45 * 1 байт)!
+    // Она целиком помещается в кэш L1 процессора
+    array<uint8_t, Width * Height> tileIds;
+
+    uint8_t get(int x, int y) const noexcept { return tileIds[x + Width * y]; }
+    void set(int x, int y, uint8_t id) noexcept { tileIds[x + Width * y] = id; }
+
+    void initDefault() noexcept {
+        for (int y = 0; y < Height; ++y) {
+            for (int x = 0; x < Width; ++x) {
+                if (x == 0 || y == 0 || x == Width - 1 || y == Height - 1) {
+                    set(x, y, TILE_WALL);
+                } else if (x == 10 && y == 10) {
+                    set(x, y, TILE_WATER);
+                } else {
+                    set(x, y, TILE_FLOOR);
+                }
+            }
+        }
+    }
+};
+
+
+
+class MapEditor : public IGameState {
+private:
+    int cursorX = 0;
+    int cursorY = 0;
+    uint8_t selectedTileId = TILE_WALL;
+
+public:
+    void OnUpdate(Game& g, float dt) override;
+    void OnDraw(const Game& g, float dt) override {
+        ClearBackground(BLACK);
+
+        // Отрисовка карты через TILE_DATABASE...
+
+        // Рисуем курсор редактора поверх (например, мигающий или полупрозрачный белый бокс)
+        float boxSize = 16.0f; // Упрощенно
+        DrawRectangleLines(cursorX * boxSize, cursorY * boxSize, boxSize, boxSize, WHITE);
+    }
+};
+
+struct Game
+{
+    bool running = true;
+    Font unscii8;
+    Font unscii8t;
+    Font unscii16;
+    Font JetBrainsMonoNL_SemiBold;
     int zoom = 2;
+
+    MainMenu mMainMenu;
+    MapEditor mMapEditor;
+    GameMap worldMap;
+
     enum { fonts_count = 4 };
     Font *fonts[fonts_count];
     int current_font = 0;
     int current_font_size = 16;
 
- };
 
-struct Game
-{
-    IGameState state;
-    Font unscii8;
-    Font unscii8t;
-    Font unscii16;
-    Font JetBrainsMonoNL_SemiBold;
-    MainMenu mMainMenu;
-    bool running = true;
+    IGameState defaultState;
+    IGameState *state = &defaultState; // Default state for safe call Enter/Leave before initialization and no needed null checks.
+    inline void ChangeState(IGameState *newState);
+    Font font() const { return *fonts[current_font];}
+    void SelectNextFont() { current_font = ++current_font % fonts_count; }
+    void SelectPrevFont() { if(--current_font < 0 )current_font = fonts_count - 1; }
+
+    inline void Update(float dt);
+    inline void Draw(float dt) const;
 };
 
-struct WorldChunk
-{
 
-};
+inline void MapEditor::OnUpdate(Game& g, float dt) {
+    // Управление курсором редактора (стрелочки или мышь)
+    if (IsKeyPressed(KEY_RIGHT) && cursorX < GameMap::Width - 1) cursorX++;
+    if (IsKeyPressed(KEY_LEFT) && cursorX > 0) cursorX--;
+    if (IsKeyPressed(KEY_DOWN) && cursorY < GameMap::Height - 1) cursorY++;
+    if (IsKeyPressed(KEY_UP) && cursorY > 0) cursorY--;
 
-struct World
-{
+    // Ставим тайл на пробел или клик
+    if (IsKeyDown(KEY_SPACE)) {
+        g.worldMap.set(cursorX, cursorY, selectedTileId);
+    }
 
-};
-
-inline void MainMenu_OnEnter(MainMenu *self, Game& g)
-{
-
+    // Возврат в меню на ESC
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        // Переключаем стейт обратно на главное меню
+        // (Управление памятью стейтов обсудим чуть ниже)
+    }
 }
-
 
 struct Player {
     int x, y;
@@ -142,139 +218,71 @@ inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float 
     DrawTexturePro(font.texture, srcRec, destRec, origin, 0.0f, tint);
 }
 
-
-inline Font* MainMenu_NextFont(MainMenu &m)
+inline void Game::ChangeState(IGameState *newState)
 {
-    m.current_font = ++m.current_font % m.fonts_count;
-    return m.fonts[m.current_font];
-}
-inline Font* MainMenu_PrevFont(MainMenu &m)
-{
-    if(--m.current_font < 0 ) m.current_font = m.fonts_count - 1;
-        return m.fonts[m.current_font];
-
-}
-inline Font* MainMenu_CurrentFont(MainMenu &m)
-{
-    return m.fonts[m.current_font];
+    state->OnLeave(*this);
+    state = newState;
+    state->OnEnter(*this);
 }
 
 
-inline void MainMenu_OnUpdate(MainMenu *self, Game& g, float dt)
+
+inline void MainMenu::OnUpdate(Game& g, float dt)
 {
-    auto &m = *self;
+    auto &m = *this;
+    const char *press_again_hint = "Нажмите ещё раз для подтверждения.";
     if (IsKeyPressed(KEY_ESCAPE)) {
         g.running = false;
     }
-    else if(IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)){
-        m.zoom++;
-    }
-    else if(IsKeyPressed(KEY_KP_SUBTRACT) || IsKeyPressed(KEY_MINUS)) {
-        if(--m.zoom < 1) m.zoom = 1;
-    }
-    else if(IsKeyPressed(KEY_PERIOD)) {
-            MainMenu_PrevFont(m);
+    else if(IsKeyPressed(KEY_ONE)) {
+        if(selectedItem == 1) {
+            g.ChangeState(&g.mMapEditor);
+        }else{
+            selectedItem = 1;
+            setHint(press_again_hint);
         }
-    else if(IsKeyPressed(KEY_COMMA)) {
-            MainMenu_NextFont(m);
+    }
+    else if(IsKeyPressed(KEY_TWO)) {
+        if(selectedItem == 2) {
+            setHint("Сорян-посорян, пока не реализованно.");
+        }else{
+            selectedItem = 2;
+            setHint(press_again_hint);
+        }
     }
 
 }
 
- inline void MainMenu_OnDraw(MainMenu* self, const Game& g, float dt)
+ inline void MainMenu::OnDraw(const Game& g, float dt)
 {
-    auto &m = *self;
+    auto &m = *this;
     ClearBackground(DARKBROWN); //
+    Vector2 pos { 100.0f, 10.0f };
+    float h1size = 32;
+    float regsize = 16;
+    DrawTextEx(g.font(), "Your will, my Feudal Lord:", pos, h1size, 0, RED );
+    pos.y += h1size * g.zoom;
 
-    Player player = { .x = 3, .y = 4 }; //
-    int spacing = 0; //
-    Font *font = MainMenu_CurrentFont(m); //
-    Color color = { 222, 222, 222, 255 }; //
-    Color bgTint = BLANK;
-    // Вычисляем размер одного квадратного тайла в пикселях
-    // Константный размер базового шрифта * зум
-    float boxSize = m.current_font_size * m.zoom;
+    Color txtColor = (selectedItem == 1) ? GOLD : WHITE;
+    DrawTextEx(g.font(), "1. Create / Edit map.", pos, regsize, 0, txtColor);
 
-    for (int x = 0; x < 10; x++) { //
-        for (int y = 0; y < 10; y++) { //
+    pos.y +=   regsize * g.zoom;
+    txtColor = (selectedItem == 2) ? GOLD : WHITE;
 
-            // Позиция левого верхнего угла нашей плитки (тайла)
-            Vector2 pos = {
-                x * boxSize,
-                y * boxSize
-            };
+    pos.y +=   regsize * g.zoom;
+    DrawTextEx(g.font(), "2. Play map.", pos, regsize, 0, txtColor);
 
-            // Определяем, какой символ (кодопоинт) рисовать в этой ячейке
-            int codepoint = '.';
-            Color textColor = color;
-
-            if (player.x == x && player.y == y) { //
-                codepoint = '@';
-                textColor = YELLOW; // подсветим игрока
-            }
-            else if (!x || !y || x >= 9 || y >= 9) { //
-                codepoint = '#';
-                bgTint = (Color){64,64,64,255};
-            }
-            else if (x == 3 && y == 3) { //
-                codepoint = 'g';
-            }
-            else if (x == 3 && y == 5) { //
-                codepoint = 'T';
-            }
-            else if(x == 4 && y == 4) {
-                codepoint = 'T';
-            }
-            else if(x==2 && y == 4) {
-                codepoint = 'H';
-            }
-
-            // Тест фоллбэка: попробуем вывести символ, которого точно нет в ASCII
-            // (например, какой-нибудь японский иероглиф или битый код 0)
-            if (x == 5 && y == 5) {
-                codepoint = 0x4E00; // Этот символ превратится в '?' или в DrawRectangleLines
-            }
-
-            // Рисуем символ строго в границах ячейки
-            DrawTextCodepointInBox(*font, codepoint, pos, boxSize, textColor, bgTint);
-            bgTint = BLACK;
-        }
-    }
-
-    // Отрисовка вашего тестового треугольника поверх
-    float offsetX = 30, offsetY = 30; //
-    int zm = 2; //
-    Vector2 v1 = { 0.0f + offsetX, 0.0f + offsetY }; //
-    Vector2 v2 = { 0.0f + offsetX, 10.0f*zm + offsetY }; //
-    Vector2 v3 = { 10.0f*zm + offsetX, 10.0f*zm + offsetY }; //
-    DrawTriangle(v1, v2, v3, GREEN); //
+    pos.y += 400;
+    DrawTextEx(g.font(), this->hint, pos, regsize, 0, WHITE);
 }
 
 
 inline void MainMenu_Init(MainMenu *self, Game& g)
 {
     auto &m = *(MainMenu*)self;
-
-    static IGameState::Vtbl v = {
-        .OnEnter = make_callback(MainMenu_OnEnter),
-        .OnUpdate = make_callback(MainMenu_OnUpdate),
-        .OnDraw =   make_callback(MainMenu_OnDraw)
-    };
-    m.state.obj = self;
-    m.state.v = &v;
-    m.fonts[0] = &g.unscii8t;
-    m.fonts[1] = &g.unscii8;
-    m.fonts[2] = &g.unscii16;
-    m.fonts[3] = &g.JetBrainsMonoNL_SemiBold;
-
 }
 
-inline void MainMenu_ChangeState(Game& g, IGameState d)
-{
-    g.state.OnLeave(g);
-    g.state = g.mMainMenu.state;
-    g.state.OnEnter(g);
-}
+
 
 inline void Game_LoadFonts(Game &g)
 {
@@ -331,24 +339,42 @@ inline void Game_Init(Game& g)
 {
     Game_LoadFonts(g);
 
+    g.fonts[0] = &g.unscii8t;
+    g.fonts[1] = &g.unscii8;
+    g.fonts[2] = &g.unscii16;
+    g.fonts[3] = &g.JetBrainsMonoNL_SemiBold;
+
+
     MainMenu_Init(&g.mMainMenu, g);
-    MainMenu_ChangeState(g, g.mMainMenu.state);
+    g.ChangeState(&g.mMainMenu);
 
 }
 
-inline void Game_Update(Game& g)
-{
-    g.state.OnUpdate(g, GetFrameTime() );
-}
-
-inline void Game_Draw(Game& g)
-{
-    g.state.OnDraw(g, GetFrameTime());
-}
 
 inline void Game_Shutdown(Game& g)
 {
     UnloadFont(g.unscii8);
     UnloadFont(g.unscii8t);
     UnloadFont(g.unscii16);
+}
+
+
+inline void Game::Update(float dt)
+{
+    if(IsKeyPressed(KEY_EQUAL)) {
+        zoom++;
+    }else if( IsKeyPressed(KEY_MINUS)) {
+        zoom--;
+    }else if( IsKeyPressed(KEY_PERIOD)) {
+        SelectPrevFont();
+    }else if( IsKeyPressed(KEY_COMMA)){
+        SelectNextFont();
+    }
+    state->OnUpdate(*this, dt);
+
+}
+
+inline void Game::Draw(float dt) const
+{
+    state->OnDraw(*this, dt);
 }
