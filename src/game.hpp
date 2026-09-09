@@ -342,10 +342,10 @@ inline void Game_LoadFonts(Game &g)
         }
         return font;
     };
-    g.unscii8 = load_font("assets/fonts/unscii-8-thin.ttf", 8);
+    g.unscii8t = load_font("assets/fonts/unscii-8-thin.ttf", 8);
     SetTextureFilter(g.unscii8.texture, TEXTURE_FILTER_POINT);
 
-    g.unscii8t = load_font("assets/fonts/unscii-8.ttf", 8);
+    g.unscii8 = load_font("assets/fonts/unscii-8.ttf", 8);
     SetTextureFilter(g.unscii8t.texture, TEXTURE_FILTER_POINT);
 
     g.unscii16 = load_font("assets/fonts/unscii-16.ttf", 16);
