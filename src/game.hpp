@@ -54,11 +54,15 @@ enum TileId : uint8_t {
 };
 
 inline const TileDef TILE_DATABASE[TILE_COUNT] = {
-    [TILE_AIR]   = { ' ', BLANK, BLANK, false },
-    [TILE_FLOOR] = { '.', { 150, 150, 150, 255 }, BLANK, false },
-    [TILE_WALL]  = { '#', LIGHTGRAY, DARKGRAY, true },
-    [TILE_WATER] = { '~', BLUE, DARKBLUE, false }
+    /*[TILE_AIR  ] =*/ { ' ', BLANK, BLANK, false },
+    /*[TILE_FLOOR] =*/ { '.', { 150, 150, 150, 255 }, BLANK, false },
+    /*[TILE_WALL]  =*/ { '#', LIGHTGRAY, DARKGRAY, true },
+    /*[TILE_WATER] =*/ { '~', BLUE, DARKBLUE, false }
 };
+
+// Проверка времени компиляции (работает без исключений и RTTI)
+static_assert(sizeof(TILE_DATABASE) / sizeof(TileDef) == TILE_COUNT,
+              "Забыл добавить тайл в TILE_DATABASE!");
 
 struct GameMap {
     static constexpr int Width = 80;
@@ -96,15 +100,7 @@ private:
 
 public:
     void OnUpdate(Game& g, float dt) override;
-    void OnDraw(const Game& g, float dt) override {
-        ClearBackground(BLACK);
-
-        // Отрисовка карты через TILE_DATABASE...
-
-        // Рисуем курсор редактора поверх (например, мигающий или полупрозрачный белый бокс)
-        float boxSize = 16.0f; // Упрощенно
-        DrawRectangleLines(cursorX * boxSize, cursorY * boxSize, boxSize, boxSize, WHITE);
-    }
+    void OnDraw(const Game& g, float dt) override;
 };
 
 struct Game
@@ -138,24 +134,7 @@ struct Game
 };
 
 
-inline void MapEditor::OnUpdate(Game& g, float dt) {
-    // Управление курсором редактора (стрелочки или мышь)
-    if (IsKeyPressed(KEY_RIGHT) && cursorX < GameMap::Width - 1) cursorX++;
-    if (IsKeyPressed(KEY_LEFT) && cursorX > 0) cursorX--;
-    if (IsKeyPressed(KEY_DOWN) && cursorY < GameMap::Height - 1) cursorY++;
-    if (IsKeyPressed(KEY_UP) && cursorY > 0) cursorY--;
 
-    // Ставим тайл на пробел или клик
-    if (IsKeyDown(KEY_SPACE)) {
-        g.worldMap.set(cursorX, cursorY, selectedTileId);
-    }
-
-    // Возврат в меню на ESC
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        // Переключаем стейт обратно на главное меню
-        // (Управление памятью стейтов обсудим чуть ниже)
-    }
-}
 
 struct Player {
     int x, y;
@@ -344,7 +323,7 @@ inline void Game_Init(Game& g)
     g.fonts[2] = &g.unscii16;
     g.fonts[3] = &g.JetBrainsMonoNL_SemiBold;
 
-
+    g.worldMap.initDefault();
     MainMenu_Init(&g.mMainMenu, g);
     g.ChangeState(&g.mMainMenu);
 
@@ -377,4 +356,102 @@ inline void Game::Update(float dt)
 inline void Game::Draw(float dt) const
 {
     state->OnDraw(*this, dt);
+}
+
+
+void MapEditor::OnDraw(const Game& g, float dt)
+{
+    ClearBackground(BLACK);
+
+    // Вычисляем размер ячейки на основе текущего зума игры
+    float boxSize = g.current_font_size * g.zoom;
+
+    // Текстовый LOD: подбираем шрифт под масштаб
+    Font fontToUse = g.JetBrainsMonoNL_SemiBold;
+    if (boxSize < 24.0f) {
+        fontToUse = g.unscii8t; // Используем базовый растровый шрифт
+    }
+
+    // 1. Отрисовка сетки карты мира
+    for (int y = 0; y < GameMap::Height; y++) {
+        for (int x = 0; x < GameMap::Width; x++) {
+            Vector2 pos = { x * boxSize, y * boxSize };
+
+            // Оптимизация: не шлем команды видеокарте, если тайл гарантированно за экраном
+            if (pos.x < GetScreenWidth() && pos.y < GetScreenHeight()) {
+                uint8_t tileId = g.worldMap.get(x, y);
+                const TileDef& def = TILE_DATABASE[tileId];
+
+                DrawTextCodepointInBox(fontToUse, def.codepoint, pos, boxSize, def.fgColor, def.bgColor);
+            }
+        }
+    }
+
+    // 2. Отрисовка курсора редактора (мигающая или полупрозрачная рамка)
+    Vector2 cursorRemarksPos = { cursorX * boxSize, cursorY * boxSize };
+
+    // Для эффекта мигания используем синус от времени
+    float alpha = (sinf(GetTime() * 8.0f) + 1.0f) * 0.5f; // значение от 0.0 до 1.0
+    Color cursorColor = Fade(YELLOW, 0.3f + alpha * 0.5f);
+
+    // Рисуем сплошной полупрозрачный бокс на месте курсора, чтобы выделить ячейку
+    DrawRectangle((int)cursorRemarksPos.x, (int)cursorRemarksPos.y, (int)boxSize, (int)boxSize, Fade(WHITE, 0.2f));
+    DrawRectangleLines((int)cursorRemarksPos.x, (int)cursorRemarksPos.y, (int)boxSize, (int)boxSize, cursorColor);
+
+    // 3. Небольшой статус-бар внизу экрана с информацией
+    int screenH = GetScreenHeight();
+    DrawRectangle(0, screenH - 25, GetScreenWidth(), 25, Fade(BLACK, 0.8f));
+
+    const TileDef& currentTileDef = TILE_DATABASE[selectedTileId];
+    char statusBuf[128];
+    snprintf(statusBuf, sizeof(statusBuf), "X: %d, Y: %d | Кисть: %c | ESC: Выход | 1-3: Выбор тайла | ЛКМ/Пробел: Рисовать",
+             cursorX, cursorY, currentTileDef.codepoint);
+
+    DrawText(statusBuf, 10, screenH - 20, 12, RAYWHITE);
+}
+
+inline void MapEditor::OnUpdate(Game& g, float dt) {
+    // 1. Возврат в меню на ESC
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        g.ChangeState(&g.mMainMenu);
+        return;
+    }
+
+    // Вычисляем текущий размер ячейки тайла на экране
+    float boxSize = g.current_font_size * g.zoom;
+
+    // 2. УПРАВЛЕНИЕ МЫШЬЮ (Перевод пикселей экрана в координаты сетки)
+    Vector2 mousePos = GetMousePosition();
+
+    // Проверяем, находится ли мышь вообще в пределах игрового окна
+    if (mousePos.x >= 0 && mousePos.x < GetScreenWidth() &&
+        mousePos.y >= 0 && mousePos.y < GetScreenHeight())
+    {
+        // Магия деления: переводим пиксели в координаты тайла (0..79 и 0..44)
+        int mouseTileX = (int)(mousePos.x / boxSize);
+        int mouseTileY = (int)(mousePos.y / boxSize);
+
+        // Защита от выхода за границы массива карт (на случай ресайза окна)
+        if (mouseTileX >= 0 && mouseTileX < GameMap::Width &&
+            mouseTileY >= 0 && mouseTileY < GameMap::Height)
+        {
+            // Курсор редактора послушно следует за мышкой!
+            cursorX = mouseTileX;
+            cursorY = mouseTileY;
+
+            // Если зажат ЛКМ (Левая Кнопка Мыши) — рисуем выбранным тайлом
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                g.worldMap.set(cursorX, cursorY, selectedTileId);
+            }
+            // Если зажат ПКМ (Правая Кнопка Мыши) — стираем (ставим пол или воздух)
+            else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                g.worldMap.set(cursorX, cursorY, TILE_FLOOR);
+            }
+        }
+    }
+
+    // 3. УПРАВЛЕНИЕ КЛАВИАТУРОЙ (Выбор кисти для рисования)
+    if (IsKeyPressed(KEY_ONE))   selectedTileId = TILE_FLOOR;
+    if (IsKeyPressed(KEY_TWO))   selectedTileId = TILE_WALL;
+    if (IsKeyPressed(KEY_THREE)) selectedTileId = TILE_WATER;
 }
