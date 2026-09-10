@@ -409,7 +409,7 @@ inline void Game::Draw(float dt) const
 }
 
 inline void MapEditor::OnUpdate(Game& g, float dt) {
-    // 1. Выход из редактора по Ctrl+Q
+    // 1. Выход из редактора по Ctrl+Q с сохранением
     if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q)) {
         g.worldMap.saveToFile("map.dat"); // Автосейв при выходе
         g.ChangeState(&g.mMainMenu);
@@ -553,7 +553,7 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
             DrawTextCodepointInBox(g.unscii16, TILE_RENDER[i].codepoint, iconPos, 16.0f, TILE_RENDER[i].fgColor, TILE_RENDER[i].bgColor);
 
             char itemBuf[256];
-            snprintf(itemBuf, sizeof(itemBuf), "[%c] - %s", 'A' + i, GetTileDescription(static_cast<TileId>(i)));
+            snprintf(itemBuf, sizeof(itemBuf), "[%2c] - %s", 'A' + i, GetTileDescription(static_cast<TileId>(i)));
 
             DrawTextEx(g.unscii16, itemBuf, { (float)winX + 65, itemY }, 16, 0, itemColor);
         }
@@ -566,7 +566,7 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
     DrawRectangle(0, screenH - 20, GetScreenWidth(), 20, { 20, 20, 20, 255 });
 
     char statusBuf[256];
-    snprintf(statusBuf, sizeof(statusBuf), "Координаты: [%d, %d] | Кисть: [%c] | Палитра: [~] | Выход: [Ctrl+Q]",
+    snprintf(statusBuf, sizeof(statusBuf), "Координаты: [%2d, %2d] | Кисть: [%c] | Палитра: [~] | Сохр/Выход: [Ctrl+Q]",
              cursorX, cursorY, currentBrush.codepoint);
 
     DrawTextEx(g.unscii8, statusBuf, { 10, (float)screenH - 14 }, 8, 0, RAYWHITE);
