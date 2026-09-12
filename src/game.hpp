@@ -44,6 +44,8 @@ struct MainMenu: IGameState
      TILE_WALL,
      TILE_WATER,
      TILE_DOOR,
+     TILE_RAMP_UP,
+     TILE_RAMP_DOWN,
      TILE_COUNT
  };
 
@@ -60,6 +62,8 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
     { '#',      LIGHTGRAY,  DARKGRAY }, //TILE_WALL
     { '~',      BLUE,       DARKBLUE }, //TILE_WATER
     { '+',      BROWN,      { 80, 50, 20, 255 } }, //TILE_DOOR
+    { '<',      GOLD,       BLANK }, //TILE_RAMP_UP
+    { '>',      GOLD,       BLANK }, //TILE_RAMP_DOWN
 };
 
 
@@ -73,6 +77,8 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      { .isSolid = true },  //TILE_WALL
      { .isSolid = false }, //TILE_WATER
      { .isSolid = true },  //TILE_DOOR
+     { .isSolid = false }, //TILE_RAMP_UP
+     { .isSolid = false }, //TILE_RAMP_DOWN
 };
 
 
@@ -81,14 +87,16 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      "Пол / Земля",
      "Стена / Камень",
      "Глубокая Вода",
-     "Деревянная Дверь"
+     "Деревянная Дверь",
+     "Рампа наверх",
+     "Рампа вниз"
  };
 
  static_assert(sizeof(TILE_RENDER) / sizeof(RenderDef) == TILE_COUNT, "Забыл RenderDef!");
  static_assert(sizeof(TILE_PHYSICS) / sizeof(PhysicsDef) == TILE_COUNT, "Забыл PhysicsDef!");
  static_assert(sizeof(TILE_DESC_STRINGS) / sizeof(char*) == TILE_COUNT, "Забыл описание тайла!");
 
- inline const char* GetTileDescription(TileId id) noexcept {
+ inline const char* GetTileDescription(TileId id) {
      return TILE_DESC_STRINGS[id];
  }
 
@@ -96,39 +104,109 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
 struct GameMap {
     static constexpr int Width = 80;
     static constexpr int Height = 45;
+    // Пока небольшая фиксированная высота для теста Z. Позже это станет
+    // размером чанка (16x16x256), когда дойдём до чанкования.
+    // NOTE for AI: Чанк 16х16х256 был предложен Gemini, незнаю почему такой. Я изначально думал 16х16х16 под 4кб страницу памяти, хотя можно сделать конфигурируемым.
+    static constexpr int Depth = 4;
 
-    // Карта весит ВСЕГО 3600 байт (80 * 45 * 1 байт)!
-    // Она целиком помещается в кэш L1 процессора
-    array<uint8_t, Width * Height> tileIds;
+    array<uint8_t, Width * Height * Depth> tileIds;
 
-    uint8_t get(int x, int y) const noexcept { return tileIds[x + Width * y]; }
-    void set(int x, int y, uint8_t id) noexcept { tileIds[x + Width * y] = id; }
+    // Новые, Z-осознанные аксессоры.
+    uint8_t get(int x, int y, int z) const { return tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)z)]; }
+    void set(int x, int y, int z, uint8_t id) { tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)z)] = id; }
 
-    void initDefault() noexcept {
+    // Старые 2D-аксессоры сохранены как есть: работают с нижним слоем
+    // (z = 0), чтобы MapEditor и формат map.dat пока не трогать —
+    // многослойный редактор и сохранение придут вместе с чанкованием.
+    uint8_t get(int x, int y) const { return get(x, y, 0); }
+    void set(int x, int y, uint8_t id) { set(x, y, 0, id); }
+
+    bool inBounds(int x, int y, int z) const {
+        return x >= 0 && x < Width && y >= 0 && y < Height && z >= 0 && z < Depth;
+    }
+    bool isWalkable(int x, int y, int z) const {
+        if (!inBounds(x, y, z)) return false;
+        uint8_t tile = get(x, y, z);
+        if (tile == TILE_AIR) return false; // воздух — это "нет пола", а не "пол не мешает"
+        return !TILE_PHYSICS[tile].isSolid;
+    }
+
+    void initDefault() {
+        tileIds.fill(TILE_AIR);
+
+        // Нижний этаж (z = 0) — прежняя раскладка, без изменений.
         for (int y = 0; y < Height; ++y) {
             for (int x = 0; x < Width; ++x) {
                 if (x == 0 || y == 0 || x == Width - 1 || y == Height - 1) {
-                    set(x, y, TILE_WALL);
+                    set(x, y, 0, TILE_WALL);
                 } else if (x == 10 && y == 10) {
-                    set(x, y, TILE_WATER);
+                    set(x, y, 0, TILE_WATER);
                 } else {
-                    set(x, y, TILE_FLOOR);
+                    set(x, y, 0, TILE_FLOOR);
                 }
             }
         }
+
+        // --- Тест-зона №1: приподнятая платформа (auto-step вверх/вниз) ---
+        // Пол z=0 под платформой заблокирован стеной ("постамент") —
+        // поэтому на том же уровне пройти нельзя, и auto-step вынужден
+        // поднять игрока на z=1. Снаружи платформы z=1 — воздух, так что
+        // сход с неё точно так же авто-степом опускает обратно на z=0.
+        for (int y = 18; y <= 22; ++y) {
+            for (int x = 20; x <= 24; ++x) {
+                set(x, y, 0, TILE_WALL);
+                set(x, y, 1, TILE_FLOOR);
+            }
+        }
+
+        // --- Тест-зона №2: шахта для явного лазанья (climb) ---
+        // Колонка пола в центре на каждом уровне z=0..Depth-1, и вокруг
+        // неё на z>=1 — маленькая комната со стенами, чтобы после подъёма
+        // было видно, что вы куда-то попали, а не просто стоите в пустоте.
+        for (int z = 0; z < Depth; ++z) {
+            set(30, 10, z, TILE_FLOOR);
+            if (z == 0) continue; // z=0 и так пол снаружи, комнату не рисуем
+            for (int y = 8; y <= 12; ++y) {
+                for (int x = 28; x <= 32; ++x) {
+                    bool border = (x == 28 || x == 32 || y == 8 || y == 12);
+                    set(x, y, z, border ? TILE_WALL : TILE_FLOOR);
+                }
+            }
+        }
+        // --- Тест-зона №3: рампа + провал (ramp / fall-through-hole) ---
+        // Маленькая комната 7x7 на z=1 (стены по периметру, пол внутри),
+        // добраться в которую можно только по рампе '<' с z=0 — обычная
+        // ходьба туда не заносит сама по себе, это осознанный тайл.
+        for (int y = 29; y <= 35; ++y) {
+            for (int x = 39; x <= 45; ++x) {
+                bool border = (x == 39 || x == 45 || y == 29 || y == 35);
+                set(x, y, 1, border ? TILE_WALL : TILE_FLOOR);
+            }
+        }
+        set(40, 32, 0, TILE_RAMP_UP);   // вход снаружи, с земли (z=0)
+        set(44, 32, 1, TILE_RAMP_DOWN); // выход обратно на землю
+        set(42, 31, 1, TILE_AIR);       // провал в полу — проверка падения
     }
-    bool saveToFile(const char* filename) const noexcept {
-        unsigned int dataSize = static_cast<unsigned int>(tileIds.size());
-        return SaveFileData(filename, const_cast<uint8_t*>(tileIds.data()), dataSize);
+    bool saveToFile(const char* filename) const {
+        // Пока сохраняем только нижний слой (z = 0) — формат map.dat
+        // и MapEditor ещё не знают про Z, это отдельный следующий шаг.
+        array<uint8_t, Width * Height> groundLayer;
+        for (int y = 0; y < Height; ++y)
+            for (int x = 0; x < Width; ++x)
+                groundLayer[x + Width * y] = get(x, y, 0);
+        unsigned int dataSize = static_cast<unsigned int>(groundLayer.size());
+        return SaveFileData(filename, groundLayer.data(), dataSize);
     }
-    bool loadFromFile(const char* filename) noexcept {
+    bool loadFromFile(const char* filename) {
         int bytesRead = 0;
         uint8_t* loadedData = LoadFileData(filename, &bytesRead);
-        if (!loadedData || bytesRead != tileIds.size()) {
+        if (!loadedData || bytesRead != Width * Height) {
             if (loadedData) UnloadFileData(loadedData);
             return false;
         }
-        std::memcpy(tileIds.data(), loadedData, bytesRead);
+        for (int y = 0; y < Height; ++y)
+            for (int x = 0; x < Width; ++x)
+                set(x, y, 0, loadedData[x + Width * y]);
         UnloadFileData(loadedData);
         return true;
     }
@@ -136,6 +214,10 @@ struct GameMap {
 };
 
 
+
+struct Player {
+    int x = 1, y = 1, z = 0;
+};
 
 struct MapEditor:  IGameState
 {
@@ -152,6 +234,26 @@ struct MapEditor:  IGameState
     void OnDraw(const Game& g, float dt) override;
 };
 
+struct GameplayState : IGameState
+{
+    Player player;
+
+    void OnEnter(Game& g) override;
+    void OnUpdate(Game& g, float dt) override;
+    void OnDraw(const Game& g, float dt) override;
+
+private:
+    void tryMoveHorizontal(Game& g, int dx, int dy);
+    void tryClimb(Game& g, int dz);
+    bool currentMoveDirection(int& dx, int& dy) const;
+
+    static constexpr float kFastMoveInterval = 1.0f / 33.0f; // подобрано на глаз (было 1/3 — казалось медленным)
+    float moveRepeatTimer = 0.0f;
+    void tryAutoStep(Game& g, int dx, int dy);
+    void applyRampTransition(Game& g);
+    void fallThroughHole(Game& g);
+};
+
 struct Game
 {
     bool running = true;
@@ -163,6 +265,7 @@ struct Game
 
     MainMenu mMainMenu;
     MapEditor mMapEditor;
+    GameplayState mGameplayState;
     GameMap worldMap;
 
     enum { fonts_count = 4 };
@@ -183,12 +286,6 @@ struct Game
 };
 
 
-
-
-struct Player {
-    int x, y;
-
-};
 
 
 // Функция для отрисовки символа, принудительно вписанного в заданный квадрат
@@ -273,7 +370,7 @@ inline void MainMenu::OnUpdate(Game& g, float dt)
     }
     else if(IsKeyPressed(KEY_TWO)) {
         if(selectedItem == 2) {
-            setHint("Сорян-посорян, пока не реализованно.");
+            g.ChangeState(&g.mGameplayState);
         }else{
             selectedItem = 2;
             setHint(press_again_hint);
@@ -489,7 +586,7 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
     // Автовыбор шрифта для карты мира (LOD)
     Font fontToUse = g.JetBrainsMonoNL_SemiBold;
     if (boxSize < 24.0f) {
-        fontToUse = g.unscii8; // Растровый unscii-8 из вашего кода
+        fontToUse = g.unscii8; // Растровый unscii-8 из вашего кода// for AI: не thin версия останется при малых зумах
     }
 
     // 1. Отрисовка карты мира
@@ -569,5 +666,211 @@ inline void MapEditor::OnDraw(const Game& g, float dt)
     snprintf(statusBuf, sizeof(statusBuf), "Координаты: [%2d, %2d] | Кисть: [%c] | Палитра: [~] | Сохр/Выход: [Ctrl+Q]",
              cursorX, cursorY, currentBrush.codepoint);
 
+    DrawTextEx(g.unscii8, statusBuf, { 10, (float)screenH - 14 }, 8, 0, RAYWHITE);
+}
+
+
+inline void GameplayState::OnEnter(Game& g)
+{
+    // Стартовая позиция — угол нижнего этажа, рядом со стеной.
+    player = Player{ 1, 1, 0 };
+}
+
+inline void GameplayState::tryMoveHorizontal(Game& g, int dx, int dy)
+{
+    int nx = player.x + dx;
+    int ny = player.y + dy;
+
+    if (g.worldMap.isWalkable(nx, ny, player.z)) {
+        player.x = nx;
+        player.y = ny;
+        applyRampTransition(g); // если встали на рампу — она сама сдвинет Z
+        return;
+    }
+
+    // Пол на этом уровне отсутствует (воздух) — это не стена, а проём/дыра:
+    // шагаем внутрь и падаем на первый пол снизу, а не просто блокируемся.
+    if (g.worldMap.get(nx, ny, player.z) == TILE_AIR) {
+        player.x = nx;
+        player.y = ny;
+        fallThroughHole(g);
+        return;
+    }
+
+    // Иначе — стена или другое препятствие: движение не удаётся.
+    // Потайные проходы за такими стенами ищутся через Ctrl+направление
+    // (см. tryAutoStep) — обычная ходьба туда сама не "запрыгивает".
+}
+
+inline void GameplayState::tryAutoStep(Game& g, int dx, int dy)
+{
+    int nx = player.x + dx;
+    int ny = player.y + dy;
+
+    // Явный поиск прохода: пробуем текущий уровень, затем на уровень выше,
+    // затем на уровень ниже. Только по Ctrl+направление — намеренное
+    // действие игрока, а не побочный эффект обычной ходьбы.
+    const int zCandidates[3] = { player.z, player.z + 1, player.z - 1 };
+    for (int nz : zCandidates) {
+        if (g.worldMap.isWalkable(nx, ny, nz)) {
+            player.x = nx;
+            player.y = ny;
+            player.z = nz;
+            return;
+        }
+    }
+}
+
+inline void GameplayState::applyRampTransition(Game& g)
+{
+    uint8_t tile = g.worldMap.get(player.x, player.y, player.z);
+    int dz = 0;
+    if (tile == TILE_RAMP_UP)   dz = 1;
+    if (tile == TILE_RAMP_DOWN) dz = -1;
+    if (dz == 0) return;
+
+    int nz = player.z + dz;
+    if (g.worldMap.isWalkable(player.x, player.y, nz)) {
+        player.z = nz;
+    }
+}
+
+inline void GameplayState::fallThroughHole(Game& g)
+{
+    // Ищем ближайший пол строго ниже текущего уровня; останавливаемся на
+    // первом найденном полу, либо на дне карты (z=0), если пола вообще нет.
+    int z = player.z - 1;
+    while (z > 0 && !g.worldMap.isWalkable(player.x, player.y, z)) {
+        --z;
+    }
+    player.z = z;
+}
+
+inline void GameplayState::tryClimb(Game& g, int dz)
+{
+    // Явное лазанье: перемещение строго по Z на месте, независимо от
+    // авто-степа при ходьбе (например, подъём по шахте/лестнице).
+    int nz = player.z + dz;
+    if (g.worldMap.isWalkable(player.x, player.y, nz)) {
+        player.z = nz;
+    }
+}
+
+inline bool GameplayState::currentMoveDirection(int& dx, int& dy) const
+{
+    // То же сопоставление клавиш, что и в тап-версии движения — просто
+    // отдаём направление, а не сразу двигаем, чтобы этим мог пользоваться
+    // и Shift-режим с таймером повторов.
+    if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) { dx = -1; dy = 0;  return true; }
+    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) { dx = 1;  dy = 0;  return true; }
+    if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) { dx = 0;  dy = -1; return true; }
+    if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) { dx = 0;  dy = 1;  return true; }
+    if (IsKeyDown(KEY_Q)) { dx = -1; dy = -1; return true; }
+    if (IsKeyDown(KEY_E)) { dx = 1;  dy = -1; return true; }
+    if (IsKeyDown(KEY_Z)) { dx = -1; dy = 1;  return true; }
+    if (IsKeyDown(KEY_X)) { dx = 1;  dy = 1;  return true; }
+    return false;
+}
+
+inline void GameplayState::OnUpdate(Game& g, float dt)
+{
+    if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q)) {
+        g.ChangeState(&g.mMainMenu);
+        return;
+    }
+
+    bool ctrlHeld = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool fastMove = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+    if (ctrlHeld) {
+        // Ctrl+направление: явный поиск прохода на уровень выше/ниже —
+        // для потайных комнат за стенами. Обычная ходьба (и бег на Shift)
+        // в стену теперь просто упирается — неочевидно, что туда можно
+        // "запрыгнуть", так что это отдельное осознанное действие.
+        // Примечание: Ctrl+Q зарезервирован под выход в меню, поэтому
+        // северо-запад (Q) через Ctrl этим способом недоступен.
+        moveRepeatTimer = 0.0f;
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) tryAutoStep(g, -1, 0);
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) tryAutoStep(g, 1, 0);
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) tryAutoStep(g, 0, -1);
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) tryAutoStep(g, 0, 1);
+        if (IsKeyPressed(KEY_E)) tryAutoStep(g, 1, -1);
+        if (IsKeyPressed(KEY_Z)) tryAutoStep(g, -1, 1);
+        if (IsKeyPressed(KEY_X)) tryAutoStep(g, 1, 1);
+    } else if (fastMove) {
+        // Shift + направление удерживается: движение с фиксированной
+        // скоростью 3 тайла/сек (не завязано на FPS), а не по одному тайлу
+        // за нажатие. tryMoveHorizontal не меняется — она просто вызывается
+        // по таймеру вместо однократного вызова по IsKeyPressed.
+        int dx = 0, dy = 0;
+        if (currentMoveDirection(dx, dy)) {
+            moveRepeatTimer += dt;
+            while (moveRepeatTimer >= kFastMoveInterval) {
+                moveRepeatTimer -= kFastMoveInterval;
+                tryMoveHorizontal(g, dx, dy);
+            }
+        } else {
+            moveRepeatTimer = 0.0f;
+        }
+    } else {
+        moveRepeatTimer = 0.0f;
+
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) tryMoveHorizontal(g, -1, 0);
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) tryMoveHorizontal(g, 1, 0);
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) tryMoveHorizontal(g, 0, -1);
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) tryMoveHorizontal(g, 0, 1);
+
+        // Диагонали: Q/E/Z/X вокруг WASD (северо-запад/северо-восток/юго-запад/юго-восток).
+        if (IsKeyPressed(KEY_Q)) tryMoveHorizontal(g, -1, -1); // северо-запад
+        if (IsKeyPressed(KEY_E)) tryMoveHorizontal(g, 1, -1);  // северо-восток
+        if (IsKeyPressed(KEY_Z)) tryMoveHorizontal(g, -1, 1);  // юго-запад
+        if (IsKeyPressed(KEY_X)) tryMoveHorizontal(g, 1, 1);   // юго-восток
+    }
+
+    // Явное лазанье — отдельно от обычной ходьбы (шахты/лестницы).
+    if (IsKeyPressed(KEY_PAGE_UP))   tryClimb(g, 1);
+    if (IsKeyPressed(KEY_PAGE_DOWN)) tryClimb(g, -1);
+}
+
+inline void GameplayState::OnDraw(const Game& g, float dt)
+{
+    ClearBackground(BLACK);
+
+    float boxSize = g.current_font_size * g.zoom;
+    Font fontToUse = g.JetBrainsMonoNL_SemiBold;
+    if (boxSize < 24.0f) {
+        fontToUse = g.unscii8;
+    }
+
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
+
+    // Камера: центрируем экран на игроке. Раньше карта рисовалась от
+    // мирового (0,0) в пикселях экрана без привязки к игроку — всё, что
+    // дальше от угла карты, чем размер окна (с учётом zoom), было
+    // физически за пределами видимой области.
+    float camOffsetX = screenW * 0.5f - (player.x + 0.5f) * boxSize;
+    float camOffsetY = screenH * 0.5f - (player.y + 0.5f) * boxSize;
+
+    // Рисуем только тот Z-уровень, на котором сейчас стоит игрок.
+    for (int y = 0; y < GameMap::Height; y++) {
+        for (int x = 0; x < GameMap::Width; x++) {
+            Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
+            if (pos.x > -boxSize && pos.x < screenW && pos.y > -boxSize && pos.y < screenH) {
+                uint8_t tileId = g.worldMap.get(x, y, player.z);
+                const RenderDef& rdef = TILE_RENDER[tileId];
+                DrawTextCodepointInBox(fontToUse, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+            }
+        }
+    }
+
+    // Игрок всегда в центре экрана, поверх карты.
+    Vector2 playerPos = { player.x * boxSize + camOffsetX, player.y * boxSize + camOffsetY };
+    DrawTextCodepointInBox(fontToUse, '@', playerPos, boxSize, YELLOW, BLANK);
+
+    DrawRectangle(0, screenH - 20, screenW, 20, { 20, 20, 20, 255 });
+    char statusBuf[256];
+    snprintf(statusBuf, sizeof(statusBuf), "Позиция: [%2d, %2d, %2d] | WASD/Стрелки: движение | QEZX: диагонали | Shift: бег | Ctrl+направление: потайной проход | PgUp/PgDn: лазанье | Выход: [Ctrl+Q]",
+             player.x, player.y, player.z);
     DrawTextEx(g.unscii8, statusBuf, { 10, (float)screenH - 14 }, 8, 0, RAYWHITE);
 }
