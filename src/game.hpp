@@ -44,8 +44,10 @@ struct MainMenu: IGameState
      TILE_WALL,
      TILE_WATER,
      TILE_DOOR,
-     TILE_RAMP_UP,
-     TILE_RAMP_DOWN,
+     TILE_RAMP_N, // поднимает при движении на север (вверх на экране)
+     TILE_RAMP_S, // юг (вниз на экране)
+     TILE_RAMP_E, // восток (вправо)
+     TILE_RAMP_W, // запад (влево)
      TILE_COUNT
  };
 
@@ -62,8 +64,10 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
     { '#',      LIGHTGRAY,  DARKGRAY }, //TILE_WALL
     { '~',      BLUE,       DARKBLUE }, //TILE_WATER
     { '+',      BROWN,      { 80, 50, 20, 255 } }, //TILE_DOOR
-    { '<',      GOLD,       BLANK }, //TILE_RAMP_UP
-    { '>',      GOLD,       BLANK }, //TILE_RAMP_DOWN
+    { 0x25B2,   GOLD,       BLANK }, //TILE_RAMP_N (▲, для палитры/превью — сама клетка рисуется в два прохода)
+    { 0x25BC,   GOLD,       BLANK }, //TILE_RAMP_S (▼)
+    { 0x25BA,   GOLD,       BLANK }, //TILE_RAMP_E (►)
+    { 0x25C4,   GOLD,       BLANK }, //TILE_RAMP_W (◄)
 };
 
 
@@ -77,8 +81,10 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      { .isSolid = true },  //TILE_WALL
      { .isSolid = false }, //TILE_WATER
      { .isSolid = true },  //TILE_DOOR
-     { .isSolid = false }, //TILE_RAMP_UP
-     { .isSolid = false }, //TILE_RAMP_DOWN
+     { .isSolid = false }, //TILE_RAMP_N
+     { .isSolid = false }, //TILE_RAMP_S
+     { .isSolid = false }, //TILE_RAMP_E
+     { .isSolid = false }, //TILE_RAMP_W
 };
 
 
@@ -88,8 +94,10 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      "Стена / Камень",
      "Глубокая Вода",
      "Деревянная Дверь",
-     "Рампа наверх",
-     "Рампа вниз"
+     "Рампа на север",
+     "Рампа на юг",
+     "Рампа на восток",
+     "Рампа на запад"
  };
 
  static_assert(sizeof(TILE_RENDER) / sizeof(RenderDef) == TILE_COUNT, "Забыл RenderDef!");
@@ -98,6 +106,44 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
 
  inline const char* GetTileDescription(TileId id) {
      return TILE_DESC_STRINGS[id];
+ }
+
+ // --- Рампы: направление, обратный тайл, значок лестницы ---
+ // Кодпоинт значка ступеней, рисуемого поверх стрелки направления (два
+ // прохода отрисовки). ВНИМАНИЕ: этот кодпоинт нужно проверить на
+ // компиляции — шрифты по умолчанию грузят только ASCII+кириллицу,
+ // 0x1328D добавлен в список загрузки отдельно (см. Game_LoadFonts), но
+ // сам символ может отсутствовать в глифах unscii-8/JetBrains Mono. Если
+ // отрисуется пусто/'?' — нужно будет подобрать другой кодпоинт.
+ constexpr int kRampStairsCodepoint = 0x1328D;
+
+ inline bool IsRampTile(uint8_t tile) {
+     return tile == TILE_RAMP_N || tile == TILE_RAMP_S || tile == TILE_RAMP_E || tile == TILE_RAMP_W;
+ }
+
+ inline void RampDirectionVector(uint8_t tile, int& dx, int& dy) {
+     dx = 0; dy = 0;
+     switch (tile) {
+         case TILE_RAMP_N: dy = -1; break;
+         case TILE_RAMP_S: dy = 1;  break;
+         case TILE_RAMP_E: dx = 1;  break;
+         case TILE_RAMP_W: dx = -1; break;
+         default: break;
+     }
+ }
+
+ inline uint8_t OppositeRampTile(uint8_t tile) {
+     switch (tile) {
+         case TILE_RAMP_N: return TILE_RAMP_S;
+         case TILE_RAMP_S: return TILE_RAMP_N;
+         case TILE_RAMP_E: return TILE_RAMP_W;
+         case TILE_RAMP_W: return TILE_RAMP_E;
+         default: return tile;
+     }
+ }
+
+ inline int RampArrowCodepoint(uint8_t tile) {
+     return TILE_RENDER[tile].codepoint; // стрелки уже лежат в TILE_RENDER для каждого направления
  }
 
 
@@ -173,19 +219,25 @@ struct GameMap {
                 }
             }
         }
-        // --- Тест-зона №3: рампа + провал (ramp / fall-through-hole) ---
-        // Маленькая комната 7x7 на z=1 (стены по периметру, пол внутри),
-        // добраться в которую можно только по рампе '<' с z=0 — обычная
-        // ходьба туда не заносит сама по себе, это осознанный тайл.
+        // --- Тест-зона №3: направленная рампа + провал ---
+        // Комната 7x7 на z=1 (стены по периметру, пол внутри). Вход —
+        // рампа '►' (TILE_RAMP_E) на земле у западной стены: подойти к
+        // ней можно только с запада (двигаясь на восток), затем ещё раз
+        // "восток" со стоя на рампе — подъём в комнату. Спуск обратно —
+        // просто идти на запад от входа: там пусто (место под рампой),
+        // и fallThroughHole сам уронит игрока обратно на рампу — второй
+        // тайл для спуска не нужен, один и тот же работает в обе стороны.
         for (int y = 29; y <= 35; ++y) {
-            for (int x = 39; x <= 45; ++x) {
-                bool border = (x == 39 || x == 45 || y == 29 || y == 35);
+            for (int x = 40; x <= 46; ++x) {
+                bool border = (x == 40 || x == 46 || y == 29 || y == 35);
                 set(x, y, 1, border ? TILE_WALL : TILE_FLOOR);
             }
         }
-        set(40, 32, 0, TILE_RAMP_UP);   // вход снаружи, с земли (z=0)
-        set(44, 32, 1, TILE_RAMP_DOWN); // выход обратно на землю
-        set(42, 31, 1, TILE_AIR);       // провал в полу — проверка падения
+        set(40, 32, 1, TILE_FLOOR);   // проём в западной стене — площадка приземления
+        set(39, 32, 0, TILE_RAMP_E);  // сама рампа, снаружи комнаты, на земле
+        // (39,32,1) намеренно остаётся TILE_AIR — проём над рампой для подъёма/падения
+
+        set(43, 31, 1, TILE_AIR); // отдельная дыра в полу — проверка обычного провала
     }
     bool saveToFile(const char* filename) const {
         // Пока сохраняем только нижний слой (z = 0) — формат map.dat
@@ -250,7 +302,7 @@ private:
     static constexpr float kFastMoveInterval = 1.0f / 33.0f; // подобрано на глаз (было 1/3 — казалось медленным)
     float moveRepeatTimer = 0.0f;
     void tryAutoStep(Game& g, int dx, int dy);
-    void applyRampTransition(Game& g);
+    void tryAscendRamp(Game& g, uint8_t rampTile);
     void fallThroughHole(Game& g);
 };
 
@@ -289,7 +341,7 @@ struct Game
 
 
 // Функция для отрисовки символа, принудительно вписанного в заданный квадрат
-inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float boxSize, Color tint, Color bgTint)
+inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float boxSize, Color tint, Color bgTint, bool flipVertical = false)
 {
     // 1. Отрисовка бэкграунда (если он не прозрачный)
     if (bgTint.a > 0) {
@@ -340,7 +392,45 @@ inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float 
     };
 
     Vector2 origin = { 0.0f, 0.0f };
-    DrawTexturePro(font.texture, srcRec, destRec, origin, 0.0f, tint);
+    Rectangle sampleRec = srcRec;
+    if (flipVertical) {
+        sampleRec.height *= -1.0f; // стандартный приём raylib: отрицательная высота источника = вертикальный флип
+    }
+    DrawTexturePro(font.texture, sampleRec, destRec, origin, 0.0f, tint);
+}
+
+// Отрисовка одной клетки карты с учётом рамп: обычный тайл — один проход
+// (как раньше), рампа — два прохода (стрелка направления, затем поверх
+// значок лестницы), а пустота, под которой скрыта рампа, — тоже два
+// прохода, но обратное направление и перевёрнутый значок лестницы (чисто
+// визуальная подсказка про возможность спуститься/провалиться туда).
+inline void DrawWorldTile(Font font, const GameMap& map, int x, int y, int z, Vector2 pos, float boxSize)
+{
+    uint8_t tileId = map.get(x, y, z);
+
+    if (tileId == TILE_AIR) {
+        if (z > 0) {
+            uint8_t below = map.get(x, y, z - 1);
+            if (IsRampTile(below)) {
+                uint8_t reverseTile = OppositeRampTile(below);
+                DrawTextCodepointInBox(font, RampArrowCodepoint(reverseTile), pos, boxSize, GOLD, BLANK);
+                DrawTextCodepointInBox(font, kRampStairsCodepoint, pos, boxSize, GOLD, BLANK, /*flipVertical=*/true);
+                return;
+            }
+        }
+        const RenderDef& rdef = TILE_RENDER[TILE_AIR];
+        DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+        return;
+    }
+
+    if (IsRampTile(tileId)) {
+        DrawTextCodepointInBox(font, RampArrowCodepoint(tileId), pos, boxSize, GOLD, TILE_RENDER[tileId].bgColor);
+        DrawTextCodepointInBox(font, kRampStairsCodepoint, pos, boxSize, GOLD, BLANK);
+        return;
+    }
+
+    const RenderDef& rdef = TILE_RENDER[tileId];
+    DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
 }
 
 inline void Game::ChangeState(IGameState *newState)
@@ -417,6 +507,15 @@ inline void Game_LoadFonts(Game &g)
     int codepoints[codepoints_size] = { 0 };
     for (int i = 0; i < 95; i++)  codepoints[i] = 32 + i;        // Латиница и знаки
     for (int i = 0; i < 255; i++) codepoints[96 + i] = 0x400 + i; // Кириллица (русские буквы)
+    // Значки рамп: стрелки направления + символ лестницы (см. kRampStairsCodepoint).
+    // ВНИМАНИЕ: сами глифы должны присутствовать в файле шрифта — то, что
+    // мы их запросили здесь, не гарантирует, что unscii-8/JetBrains Mono
+    // их реально содержат (особенно 0x1328D, иероглифический диапазон).
+    codepoints[351] = 0x25B2; // ▲
+    codepoints[352] = 0x25BC; // ▼
+    codepoints[353] = 0x25BA; // ►
+    codepoints[354] = 0x25C4; // ◄
+    codepoints[355] = kRampStairsCodepoint; // 0x1328D
 
     constexpr int bufsize = 2048;
     char buf[bufsize];
@@ -678,13 +777,35 @@ inline void GameplayState::OnEnter(Game& g)
 
 inline void GameplayState::tryMoveHorizontal(Game& g, int dx, int dy)
 {
+    // Если стоим на рампе и направление совпадает с направлением рампы —
+    // это не обычный шаг, а подъём (см. tryAscendRamp).
+    uint8_t currentTile = g.worldMap.get(player.x, player.y, player.z);
+    if (IsRampTile(currentTile)) {
+        int rdx, rdy;
+        RampDirectionVector(currentTile, rdx, rdy);
+        if (dx == rdx && dy == rdy) {
+            tryAscendRamp(g, currentTile);
+            return;
+        }
+    }
+
     int nx = player.x + dx;
     int ny = player.y + dy;
 
     if (g.worldMap.isWalkable(nx, ny, player.z)) {
+        uint8_t targetTile = g.worldMap.get(nx, ny, player.z);
+        if (IsRampTile(targetTile)) {
+            // На рампу можно ступить только с "противоположной" стороны —
+            // то есть двигаясь ровно в направлении самой рампы. С любой
+            // другой стороны она ведёт себя как обычная стена.
+            int rdx, rdy;
+            RampDirectionVector(targetTile, rdx, rdy);
+            if (dx != rdx || dy != rdy) {
+                return;
+            }
+        }
         player.x = nx;
         player.y = ny;
-        applyRampTransition(g); // если встали на рампу — она сама сдвинет Z
         return;
     }
 
@@ -721,18 +842,27 @@ inline void GameplayState::tryAutoStep(Game& g, int dx, int dy)
     }
 }
 
-inline void GameplayState::applyRampTransition(Game& g)
+inline void GameplayState::tryAscendRamp(Game& g, uint8_t rampTile)
 {
-    uint8_t tile = g.worldMap.get(player.x, player.y, player.z);
-    int dz = 0;
-    if (tile == TILE_RAMP_UP)   dz = 1;
-    if (tile == TILE_RAMP_DOWN) dz = -1;
-    if (dz == 0) return;
+    int rdx, rdy;
+    RampDirectionVector(rampTile, rdx, rdy);
 
-    int nz = player.z + dz;
-    if (g.worldMap.isWalkable(player.x, player.y, nz)) {
-        player.z = nz;
+    // Подняться можно только если прямо над рампой пусто — это место
+    // намеренно держим свободным под проход/переход на клетку выше.
+    if (g.worldMap.get(player.x, player.y, player.z + 1) != TILE_AIR) {
+        return;
     }
+
+    int lx = player.x + rdx;
+    int ly = player.y + rdy;
+    int lz = player.z + 1;
+    if (!g.worldMap.isWalkable(lx, ly, lz)) {
+        return; // наверху не на что приземлиться
+    }
+
+    player.x = lx;
+    player.y = ly;
+    player.z = lz;
 }
 
 inline void GameplayState::fallThroughHole(Game& g)
@@ -857,9 +987,7 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
         for (int x = 0; x < GameMap::Width; x++) {
             Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
             if (pos.x > -boxSize && pos.x < screenW && pos.y > -boxSize && pos.y < screenH) {
-                uint8_t tileId = g.worldMap.get(x, y, player.z);
-                const RenderDef& rdef = TILE_RENDER[tileId];
-                DrawTextCodepointInBox(fontToUse, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+                DrawWorldTile(fontToUse, g.worldMap, x, y, player.z, pos, boxSize);
             }
         }
     }
