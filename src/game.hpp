@@ -299,6 +299,8 @@ struct MapEditor:  IGameState
 struct GameplayState : IGameState
 {
     Player player;
+    int cameraZ = 0; // GEMINI: добавляем функционал управления камерой колесом мыши.
+
 
     void OnEnter(Game& g) override;
     void OnUpdate(Game& g, float dt) override;
@@ -781,6 +783,7 @@ inline void GameplayState::OnEnter(Game& g)
 {
     // Стартовая позиция — угол нижнего этажа, рядом со стеной.
     player = Player{ 1, 1, 0 };
+    cameraZ = player.z;
 }
 
 inline void GameplayState::tryMoveHorizontal(Game& g, int dx, int dy)
@@ -912,6 +915,20 @@ inline bool GameplayState::currentMoveDirection(int& dx, int& dy) const
 
 inline void GameplayState::OnUpdate(Game& g, float dt)
 {
+
+    // GEMINI: Управление высотой камеры с помощью колёсика мыши
+    float wheel = GetMouseWheelMove();
+    if (wheel > 0.0f) {
+        if (cameraZ < GameMap::Depth - 1) cameraZ++;
+    } else if (wheel < 0.0f) {
+        if (cameraZ > 0) cameraZ--;
+    }
+
+    // GEMINI: Сброс камеры на уровень игрока по нажатию F1 или колёсика мыши
+    if (IsKeyPressed(KEY_F1) || IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
+        cameraZ = player.z;
+    }
+
     if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_Q)) {
         g.ChangeState(&g.mMainMenu);
         return;
@@ -920,28 +937,22 @@ inline void GameplayState::OnUpdate(Game& g, float dt)
     bool ctrlHeld = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     bool fastMove = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
 
+    int oldZ = player.z; // Запоминаем Z до начала движения
+    int dx = 0, dy = 0;
+    bool moved = false;
+
     if (ctrlHeld) {
-        // Ctrl+направление: явный поиск прохода на уровень выше/ниже —
-        // для потайных комнат за стенами. Обычная ходьба (и бег на Shift)
-        // в стену теперь просто упирается — неочевидно, что туда можно
-        // "запрыгнуть", так что это отдельное осознанное действие.
-        // Примечание: Ctrl+Q зарезервирован под выход в меню, поэтому
-        // северо-запад (Q) через Ctrl этим способом недоступен.
         moveRepeatTimer = 0.0f;
-        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) tryAutoStep(g, -1, 0);
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) tryAutoStep(g, 1, 0);
-        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) tryAutoStep(g, 0, -1);
-        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) tryAutoStep(g, 0, 1);
-        if (IsKeyPressed(KEY_E)) tryAutoStep(g, 1, -1);
-        if (IsKeyPressed(KEY_Z)) tryAutoStep(g, -1, 1);
-        if (IsKeyPressed(KEY_X)) tryAutoStep(g, 1, 1);
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) { tryAutoStep(g, -1, 0); moved = true; }
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) { tryAutoStep(g, 1, 0);  moved = true; }
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) { tryAutoStep(g, 0, -1); moved = true; }
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) { tryAutoStep(g, 0, 1);  moved = true; }
+        if (IsKeyPressed(KEY_E)) { tryAutoStep(g, 1, -1); moved = true; }
+        if (IsKeyPressed(KEY_Z)) { tryAutoStep(g, -1, 1); moved = true; }
+        if (IsKeyPressed(KEY_X)) { tryAutoStep(g, 1, 1);  moved = true; }
     } else if (fastMove) {
-        // Shift + направление удерживается: движение с фиксированной
-        // скоростью 3 тайла/сек (не завязано на FPS), а не по одному тайлу
-        // за нажатие. tryMoveHorizontal не меняется — она просто вызывается
-        // по таймеру вместо однократного вызова по IsKeyPressed.
-        int dx = 0, dy = 0;
         if (currentMoveDirection(dx, dy)) {
+            moved = true; // Бег запущен
             moveRepeatTimer += dt;
             while (moveRepeatTimer >= kFastMoveInterval) {
                 moveRepeatTimer -= kFastMoveInterval;
@@ -952,66 +963,86 @@ inline void GameplayState::OnUpdate(Game& g, float dt)
         }
     } else {
         moveRepeatTimer = 0.0f;
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) { dx = -1; dy = 0;  moved = true; }
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) { dx = 1;  dy = 0;  moved = true; }
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) { dx = 0;  dy = -1; moved = true; }
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) { dx = 0;  dy = 1;  moved = true; }
 
-        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) tryMoveHorizontal(g, -1, 0);
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) tryMoveHorizontal(g, 1, 0);
-        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) tryMoveHorizontal(g, 0, -1);
-        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) tryMoveHorizontal(g, 0, 1);
+        if (IsKeyPressed(KEY_Q)) { dx = -1; dy = -1; moved = true; }
+        if (IsKeyPressed(KEY_E)) { dx = 1;  dy = -1; moved = true; }
+        if (IsKeyPressed(KEY_Z)) { dx = -1; dy = 1;  moved = true; }
+        if (IsKeyPressed(KEY_X)) { dx = 1;  dy = 1;  moved = true; }
 
-        // Диагонали: Q/E/Z/X вокруг WASD (северо-запад/северо-восток/юго-запад/юго-восток).
-        if (IsKeyPressed(KEY_Q)) tryMoveHorizontal(g, -1, -1); // северо-запад
-        if (IsKeyPressed(KEY_E)) tryMoveHorizontal(g, 1, -1);  // северо-восток
-        if (IsKeyPressed(KEY_Z)) tryMoveHorizontal(g, -1, 1);  // юго-запад
-        if (IsKeyPressed(KEY_X)) tryMoveHorizontal(g, 1, 1);   // юго-восток
+        if (moved) {
+            tryMoveHorizontal(g, dx, dy);
+        }
     }
 
-    // Явное лазанье — отдельно от обычной ходьбы (шахты/лестницы).
-    if (IsKeyPressed(KEY_PAGE_UP))   tryClimb(g, 1);
-    if (IsKeyPressed(KEY_PAGE_DOWN)) tryClimb(g, -1);
+    // Явное лазанье (PageUp / PageDown)
+    if (IsKeyPressed(KEY_PAGE_UP))   { tryClimb(g, 1);  moved = true; }
+    if (IsKeyPressed(KEY_PAGE_DOWN)) { tryClimb(g, -1); moved = true; }
+
+    // В самом конце OnUpdate, перед закрывающей скобкой }
+    // Если игрок совершил движение и его физический уровень Z изменился (рампа/падение),
+    // камера автоматически следует за ним.
+    if (moved && player.z != oldZ) {
+        cameraZ = player.z;
+    }
+
 }
 
-inline void GameplayState::OnDraw(const Game& g, float dt)
+
+inline void GameplayState::OnDraw(const Game& g, float dt) // код от Gemini
 {
     ClearBackground(BLACK);
 
     float boxSize = g.current_font_size * g.zoom;
-    Font fontToUse = g.JetBrainsMonoNL_SemiBold;
-    if (boxSize < 24.0f) {
-        fontToUse = g.unscii8;
-    }
+    Font fontToUse = (boxSize < 24.0f) ? g.unscii8 : g.JetBrainsMonoNL_SemiBold;
 
     int screenW = GetScreenWidth();
     int screenH = GetScreenHeight();
 
-    // Камера: центрируем экран на игроке. Раньше карта рисовалась от
-    // мирового (0,0) в пикселях экрана без привязки к игроку — всё, что
-    // дальше от угла карты, чем размер окна (с учётом zoom), было
-    // физически за пределами видимой области.
+    // Центрирование камеры на игроке
     float camOffsetX = screenW * 0.5f - (player.x + 0.5f) * boxSize;
     float camOffsetY = screenH * 0.5f - (player.y + 0.5f) * boxSize;
 
-    // Композитный рендер: от (player.z - kSliceDepth) до player.z снизу
-    // вверх. Верхние слои рисуются позже и перекрывают нижние там, где
-    // сами непрозрачны (стены, пол с заливкой) — там, где выше пусто,
-    // нижние слои "просвечивают". Всё ниже собственного уровня игрока
-    // подёрнуто полупрозрачной голубой вуалью — чтобы не путать с тем,
-    // что под ногами. Глубже kSliceDepth просто не рисуем — там уже и
-    // так чёрный фон от ClearBackground.
+    // Диапазон слоёв теперь привязан к cameraZ (свободный осмотр)
     constexpr int kSliceDepth = 5;
-    const Color kVeilColor = { 40, 120, 220, 90 };
-
-    int topZ = player.z;
-    int bottomZ = player.z - kSliceDepth;
+    int topZ = cameraZ;
+    int bottomZ = cameraZ - kSliceDepth;
     if (bottomZ < 0) bottomZ = 0;
 
-    for (int y = 0; y < GameMap::Height; y++) {
-        for (int x = 0; x < GameMap::Width; x++) {
-            Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
-            if (pos.x <= -boxSize || pos.x >= screenW || pos.y <= -boxSize || pos.y >= screenH) {
-                continue;
-            }
-            for (int z = bottomZ; z <= topZ; ++z) {
+    // Сила вуали по Клоду (накапливается с каждым слоем ниже уровня взгляда камеры)
+    const Color kVeilColor = { 40, 120, 220, 90 };
+
+    // Главное исправление: Z-цикл вынесен на самый верх! (Оптимизация батчинга O(N))
+    for (int z = bottomZ; z <= topZ; ++z) {
+
+        for (int y = 0; y < GameMap::Height; y++) {
+            for (int x = 0; x < GameMap::Width; x++) {
+                Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
+
+                // Эффективное отсечение невидимых тайлов
+                if (pos.x <= -boxSize || pos.x >= screenW || pos.y <= -boxSize || pos.y >= screenH) {
+                    continue;
+                }
+                // Проверяем, скрыт ли тайл непрозрачным полом/стеной выше него
+                bool isHidden = false;
+                for (int checkZ = z + 1; checkZ <= topZ; ++checkZ) {
+                    if (g.worldMap.get(x, y, checkZ) != TILE_AIR) {
+                        isHidden = true;
+                        break;
+                    }
+                }
+                if (isHidden)
+                    continue; // Если скрыт — не рисуем его и не накладываем вуаль
+
+                // Вызываем красивый двухпроходный рендер Клода
                 DrawWorldTile(fontToUse, g.worldMap, x, y, z, pos, boxSize);
+
+                // Если этот слой находится ниже плоскости камеры, накладываем вуаль
+                // За счёт правильного порядка циклов, альфа будет красиво складываться,
+                // уводя глубокие провалы в сплошной синий цвет.
                 if (z < topZ) {
                     DrawRectangle((int)pos.x, (int)pos.y, (int)boxSize, (int)boxSize, kVeilColor);
                 }
@@ -1019,13 +1050,18 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
         }
     }
 
-    // Игрок всегда в центре экрана, поверх карты.
-    Vector2 playerPos = { player.x * boxSize + camOffsetX, player.y * boxSize + camOffsetY };
-    DrawTextCodepointInBox(fontToUse, '@', playerPos, boxSize, YELLOW, BLANK);
+    // Игрок всегда в центре экрана, поверх карты на своём физическом Z-уровне
+    // Рисуем его только если его уровень Z попадает в текущий срез видимости камеры
+    if (player.z >= bottomZ && player.z <= topZ) {
+        Vector2 playerPos = { player.x * boxSize + camOffsetX, player.y * boxSize + camOffsetY };
+        DrawTextCodepointInBox(fontToUse, '@', playerPos, boxSize, YELLOW, BLANK);
+    }
 
+    // Интерфейс статус-бара
     DrawRectangle(0, screenH - 20, screenW, 20, { 20, 20, 20, 255 });
     char statusBuf[256];
-    snprintf(statusBuf, sizeof(statusBuf), "Позиция: [%2d, %2d, %2d] | WASD/Стрелки: движение | QEZX: диагонали | Shift: бег | Ctrl+направление: потайной проход | PgUp/PgDn: лазанье | Выход: [Ctrl+Q]",
-             player.x, player.y, player.z);
+    snprintf(statusBuf, sizeof(statusBuf),
+             " Поз: [%2d, %2d, %2d] | Видимый срез Z: %d | Колёсико: осмотр высот | F1/Клик мыши: сброс к игроку | Выход: [Ctrl+Q]",
+             player.x, player.y, player.z, cameraZ);
     DrawTextEx(g.unscii8, statusBuf, { 10, (float)screenH - 14 }, 8, 0, RAYWHITE);
 }

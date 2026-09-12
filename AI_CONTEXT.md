@@ -49,3 +49,33 @@
 5. **[Feature] Doors:** map objects (separate layer), not started. No MapEditor hotkey exists yet for painting ramp tiles either — still procedural-only.
 6. **[Design] Input abstraction for Android:** `GameplayState::OnUpdate`'s three modifier branches are the coupling to watch.
 7. **[Design] Chunk size** and **[Design] Persistence (SQLite vs flat file)** — both still open decisions.
+
+##Критика от Google Gemini:
+В чём проблемы реализации Клода?1. Серьезная просадка FPS (Критический баг O(N³))Посмотрите на порядок вложенности циклов в его OnDraw
+for (int y = 0; y < GameMap::Height; y++) {
+    for (int x = 0; x < GameMap::Width; x++) {
+        // ... проверка отсечения ...
+        for (int z = bottomZ; z <= topZ; ++z) {
+            DrawWorldTile(...); // ❌ Отрисовка И вуаль вызываются по Z для КАЖДОЙ плитки x,y
+            if (z < topZ) {
+                DrawRectangle(..., kVeilColor); 
+            }
+        }
+    }
+}
+Используйте код с осторожностью.Почему это баг: Вместо того чтобы нарисовать один слой целиком, а потом поверх него рисовать следующий, Клод итерируется по координате (x, y) и внутри нее запускает цикл по Z.К чему это приведет: Из-за этого вызовы DrawTextCodepointInBox и DrawRectangle ломают кэш текстурных батчей Raylib для каждого тайла. Вместо нескольких эффективных батчей отрисовки на слой, видеокарта делает тысячи переключений состояний (Draw Calls) на каждый чих. Игра начнет сильно лагать, как только карта заполнится тайлами.
+
+ В чём корень проблемы и как её исправить?В коде Клода циклы идут так: X ➔ Y ➔ Z. То есть для плитки (0,0) вызывается отрисовка Z=0, Z=1, Z=2. Потом для плитки (1,0) снова Z=0, Z=1, Z=2.Внутри DrawWorldTile для каждого прохода (DrawTextCodepointInBox) движок Raylib пытается активировать текстуру шрифта. Из-за постоянного переключения между координатами и слоями Z внутренний батчер Raylib (rlDrawRenderBatch) принудительно сбрасывает геометрию на видеокарту сотни раз за кадр.Решение: Мы меняем порядок циклов на Z ➔ Y ➔ X.Мы отрисуем сначала весь слой z = 0 (все его тайлы), затем наложим синюю вуаль на весь экран (или только на те клетки, где рендерился этот слой), затем перейдём к z = 1 и так далее. Для Raylib это идеальный паттерн: он сможет сгруппировать отрисовку тысяч символов одного слоя в один единственный Draw Call.Плюс ко всему, мы интегрируем сюда управление свободной камерой по Z, которое мы отладили ранее (ведь Клод его не написал, и рендер у него жёстко завязан на player.z).
+ 
+ ## Renderer Customizations (`DrawTextCodepointInBox`)
+* Fixed-box glyph rendering with pixel snapping and font-size LOD.
+* **Composite multi-slice rendering & Camera Z scrubbing — implemented this session.**
+* Render loops optimized to `Z -> Y -> X` ordering. This fixed a critical O(N³) Raylib batching performance issue present in the initial Claude implementation (which did X -> Y -> Z and broke texture batching every cell).
+* **Top-Down Occlusion Check implemented:** Upper opaque tiles fully block lower layers from rendering on the same X/Y cell. `kVeilColor` accumulates smoothly only through open air (`TILE_AIR`) shafts and holes, creating an accurate, readable visual depth.
+* Global `g.zoom` bug still leaks between states; root cause in `MainMenu::OnUpdate` still not fixed.
+
+## CURRENT TODO LIST / BACKLOG
+1. **[VERIFY] Playtest updated composite rendering:** confirm the Z-order optimization holds up, occlusion functions correctly, and performance stays crisp.
+2. **[NEXT] Fix Climb Mechanic & Map Shaft:** `tryClimb` allows walking through ceilings. Need to restrict it so player can only climb if there is `TILE_AIR` directly above them and a wall adjacent to hold onto. Update `initDefault()` area #2 to make the shaft realistic (open air in the center instead of solid floors).
+3. **[BUG] Shared `zoom` on `Game`:** still leaks between states.
+4. **[Feature] Doors:** map objects (separate layer), not started.
