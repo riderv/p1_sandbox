@@ -79,3 +79,10 @@ for (int y = 0; y < GameMap::Height; y++) {
 2. **[NEXT] Fix Climb Mechanic & Map Shaft:** `tryClimb` allows walking through ceilings. Need to restrict it so player can only climb if there is `TILE_AIR` directly above them and a wall adjacent to hold onto. Update `initDefault()` area #2 to make the shaft realistic (open air in the center instead of solid floors).
 3. **[BUG] Shared `zoom` on `Game`:** still leaks between states.
 4. **[Feature] Doors:** map objects (separate layer), not started.
+
+##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+## True-Voxel World Model (Minecraft-style Z-axis)
+* **Crucial Paradigm Shift:** The `z` coordinate represents the space occupied by the entity's body/head (which must be `TILE_AIR`), NOT the floor level. 
+* The actual solid block the player stands on is always located at `player.z - 1`. 
+* Example: To stand on the ground level (bedrock/earth at `z=0`), the player must have `player.z = 1`. Moving to `z=0` is blocked because it is physically inside the solid ground block.
+* All physics checks (`isWalkable`, `tryClimb`, `fallThroughHole`, and ramps) must be updated to inspect `z - 1` for standing support and `z` for body headroom.
