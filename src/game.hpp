@@ -110,12 +110,10 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
 
  // --- Рампы: направление, обратный тайл, значок лестницы ---
  // Кодпоинт значка ступеней, рисуемого поверх стрелки направления (два
- // прохода отрисовки). ВНИМАНИЕ: этот кодпоинт нужно проверить на
- // компиляции — шрифты по умолчанию грузят только ASCII+кириллицу,
- // 0x1328D добавлен в список загрузки отдельно (см. Game_LoadFonts), но
- // сам символ может отсутствовать в глифах unscii-8/JetBrains Mono. Если
- // отрисуется пусто/'?' — нужно будет подобрать другой кодпоинт.
- constexpr int kRampStairsCodepoint = 0x1328D;
+ // прохода отрисовки). 'H' — обычный ASCII, гарантированно есть в любом
+ // загруженном шрифте (было 0x1328D, иероглиф-"лестница", но такого
+ // глифа не нашлось в файлах unscii-8/JetBrains Mono — рендерился '?').
+ constexpr int kRampStairsCodepoint = 'H'; // было 0x1328D (иероглиф-лестница) — глифа не оказалось в файле шрифта
 
  inline bool IsRampTile(uint8_t tile) {
      return tile == TILE_RAMP_N || tile == TILE_RAMP_S || tile == TILE_RAMP_E || tile == TILE_RAMP_W;
@@ -236,6 +234,18 @@ struct GameMap {
         set(40, 32, 1, TILE_FLOOR);   // проём в западной стене — площадка приземления
         set(39, 32, 0, TILE_RAMP_E);  // сама рампа, снаружи комнаты, на земле
         // (39,32,1) намеренно остаётся TILE_AIR — проём над рампой для подъёма/падения
+
+        // Северный вход: рампа смотрит на юг — заходишь и поднимаешься,
+        // двигаясь вниз по экрану.
+        set(43, 29, 1, TILE_FLOOR);   // проём в северной стене
+        set(43, 28, 0, TILE_RAMP_S);
+        // (43,28,1) — TILE_AIR, проём над рампой
+
+        // Южный вход: рампа смотрит на север — заходишь и поднимаешься,
+        // двигаясь вверх по экрану.
+        set(43, 35, 1, TILE_FLOOR);   // проём в южной стене
+        set(43, 36, 0, TILE_RAMP_N);
+        // (43,36,1) — TILE_AIR, проём над рампой
 
         set(43, 31, 1, TILE_AIR); // отдельная дыра в полу — проверка обычного провала
     }
@@ -507,15 +517,13 @@ inline void Game_LoadFonts(Game &g)
     int codepoints[codepoints_size] = { 0 };
     for (int i = 0; i < 95; i++)  codepoints[i] = 32 + i;        // Латиница и знаки
     for (int i = 0; i < 255; i++) codepoints[96 + i] = 0x400 + i; // Кириллица (русские буквы)
-    // Значки рамп: стрелки направления + символ лестницы (см. kRampStairsCodepoint).
-    // ВНИМАНИЕ: сами глифы должны присутствовать в файле шрифта — то, что
-    // мы их запросили здесь, не гарантирует, что unscii-8/JetBrains Mono
-    // их реально содержат (особенно 0x1328D, иероглифический диапазон).
+    // Значки рамп: стрелки направления (см. TILE_RENDER). Символ лестницы
+    // сам по себе теперь обычный ASCII ('H'), отдельно грузить не нужно —
+    // уже покрыт диапазоном 32-126 выше.
     codepoints[351] = 0x25B2; // ▲
     codepoints[352] = 0x25BC; // ▼
     codepoints[353] = 0x25BA; // ►
     codepoints[354] = 0x25C4; // ◄
-    codepoints[355] = kRampStairsCodepoint; // 0x1328D
 
     constexpr int bufsize = 2048;
     char buf[bufsize];
@@ -982,12 +990,31 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
     float camOffsetX = screenW * 0.5f - (player.x + 0.5f) * boxSize;
     float camOffsetY = screenH * 0.5f - (player.y + 0.5f) * boxSize;
 
-    // Рисуем только тот Z-уровень, на котором сейчас стоит игрок.
+    // Композитный рендер: от (player.z - kSliceDepth) до player.z снизу
+    // вверх. Верхние слои рисуются позже и перекрывают нижние там, где
+    // сами непрозрачны (стены, пол с заливкой) — там, где выше пусто,
+    // нижние слои "просвечивают". Всё ниже собственного уровня игрока
+    // подёрнуто полупрозрачной голубой вуалью — чтобы не путать с тем,
+    // что под ногами. Глубже kSliceDepth просто не рисуем — там уже и
+    // так чёрный фон от ClearBackground.
+    constexpr int kSliceDepth = 5;
+    const Color kVeilColor = { 40, 120, 220, 90 };
+
+    int topZ = player.z;
+    int bottomZ = player.z - kSliceDepth;
+    if (bottomZ < 0) bottomZ = 0;
+
     for (int y = 0; y < GameMap::Height; y++) {
         for (int x = 0; x < GameMap::Width; x++) {
             Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
-            if (pos.x > -boxSize && pos.x < screenW && pos.y > -boxSize && pos.y < screenH) {
-                DrawWorldTile(fontToUse, g.worldMap, x, y, player.z, pos, boxSize);
+            if (pos.x <= -boxSize || pos.x >= screenW || pos.y <= -boxSize || pos.y >= screenH) {
+                continue;
+            }
+            for (int z = bottomZ; z <= topZ; ++z) {
+                DrawWorldTile(fontToUse, g.worldMap, x, y, z, pos, boxSize);
+                if (z < topZ) {
+                    DrawRectangle((int)pos.x, (int)pos.y, (int)boxSize, (int)boxSize, kVeilColor);
+                }
             }
         }
     }

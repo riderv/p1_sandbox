@@ -4,8 +4,8 @@
 //#include <stdlib.h>
 #include <raylib.h> // Теперь raylib.h подключен ко всему проекту!
 
-#include "talloc.h"
-
+//#include "talloc.h"
+#include <stdio.h>
 #include <cmath>
 #include <cstdint>
 #include <array>
