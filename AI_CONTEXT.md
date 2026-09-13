@@ -1,4 +1,4 @@
-# AI Context for p1_sandbox
+	# AI Context for p1_sandbox
 
 ## Repo layout
 `src/`: `game.hpp`, `main.cpp`, `pch.h`, `talloc.c`/`talloc.h` (a downloaded hierarchical memory allocator library, not yet relevant). Root: `AI_CONTEXT.md`, `CMakeLists.txt`. `assets/fonts/`: `unscii-8.ttf`, `unscii-8-thin.ttf`, `unscii-16.ttf`, `JetBrainsMonoNL-SemiBold.ttf`, `JetBrainsMono-SemiBoldItalic.ttf`, `FSEX302.ttf`, `PressStart2P.ttf`.
@@ -131,3 +131,50 @@ for (int y = 0; y < GameMap::Height; y++) {
   - `z = 1`: 1st-story living space (TILE_AIR for body/head, surrounded by TILE_WALL).
   - `z = 2`: Inter-floor structural slab (Solid TILE_FLOOR acting as 1st-story ceiling and 2nd-story ground support).
   - `z = 3`: 2nd-story living space (TILE_AIR for body/head, surrounded by TILE_WALL).
+
+
+
+# AI Context for p1_sandbox
+
+## Repo layout
+`src/`: `game.hpp`, `main.cpp`, `pch.h`, `talloc.c`/`talloc.h`. 
+Root: `AI_CONTEXT.md`, `CMakeLists.txt`. 
+`assets/fonts/`: `unscii-8.ttf`, `unscii-8-thin.ttf`, `unscii-16.ttf`, `JetBrainsMonoNL-SemiBold.ttf`.
+
+## Core Tech Stack
+* C++23, `-fno-exceptions`, `-fno-rtti`, Raylib 6.0+. 
+* **Error handling:** no `noexcept` — early crash/abort on unrecoverable errors, or explicit return-code/bounds checks otherwise.
+
+## True-Voxel World Model (Minecraft-style Z-axis)
+* **Core Paradigm:** The entity's `z` coordinate represents the exact space occupied by the body/head (which expects `TILE_AIR` or non-solid blocks). The solid block supporting the feet is located strictly at `z - 1`.
+* Spawn points, camera focus, and physics constraints shifted from old 2D floors (`z = 0`) to eye-level space (`z = 1`).
+* `isWalkable` checks non-solid body headroom at `z` and solid grounding underneath at `z - 1`. It explicitly blocks entering solid voxels like `TILE_FLOOR` or `TILE_WALL` horizontally.
+* `fallThroughHole` cascades downward through open air, safely locking the entity's position exactly one tile above the first discovered solid layer.
+* **Multi-Story Buildings:** Floors separating stories are full 1x1x1 solid voxel layers (`TILE_FLOOR`). A standard 2-story building layout uses `z=1` for 1st-floor living space, `z=2` for the concrete slab ceiling/floor, and `z=3` for 2nd-floor living space.
+
+## Renderer Customizations (`DrawTextCodepointInBox`)
+* Fixed-box glyph rendering with pixel snapping and font-size LOD.
+* **Top-Down Occlusion Check Loop:** The render loop inside `OnDraw` iterates over `z` from `bottomZ` up to `topZ`, and checks `checkZ` from `z+1` to `topZ` to see if a solid block occludes the tile. If hidden, rendering is skipped.
+* **Voxel Wall Roofs:** `DrawWorldTile` dynamically renders flat dot roofs (`.`) on walls (`TILE_WALL` and `TILE_BORDER_WALL`) if they are below the camera baseline (`z < cameraZ`), preventing players from feeling "inside the block" when standing on top of walls.
+* **Dynamic Depth Veil:** Layers below the camera's baseline (`z < cameraZ - 1`) receive a translucent overlay (`kVeilColor = {40,120,220,90}`).
+* **Dynamic Player Veil:** `@` smoothly darkens/blends with the veil below the camera, and fades to a translucent phantom silhouette if the camera dives underneath the player's layer (`player.z > cameraZ`).
+* **The `↔` Staircase Visual Bug:** Currently, `DrawWorldTile` renders the ramp arrow at `z=0` AND the reverse tile at `z=1` simultaneously if both layers are inside the camera's visibility window, merging `►` and `◄` into a single bidirectional symbol `↔`. This provides a cool, unintentional ASCII indicator but needs code separation later.
+
+## Data Structures
+* `TileId`: `TILE_AIR`, `TILE_FLOOR`, `TILE_WALL`, `TILE_WATER`, `TILE_DOOR`, `TILE_RAMP_N/S/E/W`, `TILE_BORDER_WALL`.
+* **`TILE_BORDER_WALL` & Smart Accessors:** `GameMap::get` automatically generates an infinite boundary wall of dark gray `#` symbols if X/Y requests go outside map dimensions. This completely prevents out-of-bounds array violations and SegFaults.
+* **`TILE_PHYSICS`:** `TILE_FLOOR` is marked as `.isSolid = false` in physics because it's walkable, but acts as a solid slab block when checked via grid arrays.
+
+## GameplayState
+* Movement: WASD/arrows/QEZX same-level; Shift = fast run; Ctrl + direction = `tryClimbLedge` (vaulting over a single block; restricted from side-clipping directional ramps).
+* **Voxel Staircases (Ramps):** Approaching a ramp requires entering through its ascending vector. Walking forward into a higher step before your face (`player.z`) triggers an automated staircase climb. Descending works via stepping back into thin air, triggering `fallThroughHole` onto the ramp below.
+* `tryClimb` (vertical shafts): PageUp/PageDown movement restricted to valid `TILE_AIR` paths adjacent to at least one anchoring `TILE_WALL`.
+* Three procedurally shifted debug areas near spawn `(1,1,1)`:
+  1. Platform `(20-24,18-22)` — `tryClimbLedge` vault test.
+  2. Vertical Shaft `(5,5)` — 3x3 open air shaft with a south entryway at `(5,6,1)`.
+  3. Two-Story Voxel House `(10-14,3-7)` — Features `z=1` living space, `z=2` concrete solid slab floor with a drop hole at `(12,5,2)`, `z=3` upper space, a southern doorway on the 1st floor, and a complete Minecraft-style staircase march on the west wall.
+
+## CURRENT TODO LIST / BACKLOG
+1. **[BUG / NEXT] Fix Ramp Symbol Overlay:** Separate `DrawWorldTile` logic so that the ascending arrow (`z=0`) and descending arrow (`z=1`) do not combine into `↔` when looking at `cameraZ = 1`.
+2. **[BUG] Shared `zoom` on `Game`:** still leaks between states; root cause in `MainMenu::OnUpdate` not fixed.
+3. **[Feature] Doors:** map objects (separate layer), not started.

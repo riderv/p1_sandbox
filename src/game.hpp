@@ -80,7 +80,7 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
 
  inline const PhysicsDef TILE_PHYSICS[TILE_COUNT] = {
      { .isSolid = false }, //TILE_AIR
-     { .isSolid = false }, //TILE_FLOOR
+     { .isSolid = true }, //TILE_FLOOR
      { .isSolid = true },  //TILE_WALL
      { .isSolid = false }, //TILE_WATER
      { .isSolid = true },  //TILE_DOOR
@@ -194,19 +194,21 @@ struct GameMap {
     }
 
     bool isWalkable(int x, int y, int z) const {
-        // Проверяем, что пространство для тела (z) и блок под ногами (z-1) в границах карты
         if (!inBounds(x, y, z) || !inBounds(x, y, z - 1)) return false;
 
-        uint8_t bodyTile = get(x, y, z);     // Блок, где находится тело игрока
+        uint8_t bodyTile = get(x, y, z);     // Блок, где находится тело/глаза игрока
         uint8_t groundTile = get(x, y, z - 1); // Блок под ногами игрока
 
         // 1. Проверка пространства для тела (голова/туловище):
-        // Там НЕ должно быть твёрдого блока (стены). Воздух или не-солид тайлы подходят.
+        // Там НЕ должно быть твёрдого блока (стены).
         if (TILE_PHYSICS[bodyTile].isSolid) return false;
+
+        // ВОКСЕЛЬНОЕ УЛУЧШЕНИЕ: Рампа — это наклонный монолит.
+        // На неё можно наступить ногами (когда она на z-1), но нельзя зайти внутрь неё лицом (когда она на уровне z).
+        if (IsRampTile(bodyTile)) return false;
 
         // 2. Проверка опоры под ногами:
         // Под ногами НЕ должно быть пустого воздуха, иначе персонаж начнёт падать.
-        // Там должен быть любой твёрдый или осязаемый блок (пол, стена нижнего этажа и т.д.).
         if (groundTile == TILE_AIR) return false;
 
         return true;
@@ -269,29 +271,46 @@ struct GameMap {
         set(5, 6, 0, TILE_FLOOR); // Земля под дверью становится прочным полом для ног
         set(5, 6, 1, TILE_AIR);   // А на уровне z=1 убираем стену, заменяя её на воздух (проход)
 
-        // --- Тест-зона №3: направленная рампа + провал ---
-        // Сдвинута ближе к спавну: комната 5x5 на z=1 сдвинута в координаты (10-14, 3-7).
-        // Вход — рампа '►' (TILE_RAMP_E) на земле у западной стены: подойти к
-        // ней можно только с запада (двигаясь на восток).
-        for (int y = 3; y <= 7; ++y) {
-            for (int x = 10; x <= 14; ++x) {
-                bool border = (x == 10 || x == 14 || y == 3 || y == 7);
-                set(x, y, 1, border ? TILE_WALL : TILE_FLOOR);
+        // --- Тест-зона №3: честный воксельный двухэтажный дом ---
+        // Координаты дома: (10-14, 3-7). Высота стен: до самого верха (z=3).
+        for (int z = 1; z < Depth; ++z) {
+            for (int y = 3; y <= 7; ++y) {
+                for (int x = 10; x <= 14; ++x) {
+                    bool isBorder = (x == 10 || x == 14 || y == 3 || y == 7);
+
+                    if (z == 1) {
+                        // Первый этаж: стены по периметру, воздух для тела внутри
+                        set(x, y, z, isBorder ? TILE_WALL : TILE_AIR);
+                    }
+                    else if (z == 2) {
+                        // Межэтажное перекрытие: сплошная плита пола (потолок 1 этажа / пол 2 этажа)
+                        set(x, y, z, TILE_FLOOR);
+                    }
+                    else if (z == 3) {
+                        // Второй этаж: стены на плите перекрытия, воздух внутри комнат
+                        set(x, y, z, isBorder ? TILE_WALL : TILE_AIR);
+                    }
+                }
             }
         }
-        set(10, 5, 1, TILE_FLOOR);   // проём в западной стене комнаты на z=1 — площадка приземления
-        set(9, 5, 0, TILE_RAMP_E);   // сама рампа, снаружи комнаты, на земле (z=0)
-        // (9,5,1) намеренно остаётся TILE_AIR — проём над рампой для подъёма/падения
 
-        // Северный вход: рампа смотрит на юг — заходишь и поднимаешься, двигаясь вниз по экрану.
-        set(12, 3, 1, TILE_FLOOR);   // проём в северной стене комнаты на z=1
-        set(12, 2, 0, TILE_RAMP_S);  // рампа снаружи на земле (z=0)
+        // --- Западный вход: Плавный лестничный марш из блоков рамп (Minecraft-style) ---
+        // Строим сквозной вертикальный проём в западной стене на всех этажах для лестничного пролёта
+        set(10, 5, 1, TILE_AIR); // Дверь первого этажа
+        set(10, 5, 2, TILE_AIR); // Проём в перекрытии, куда выходит лестница на второй этаж
+        set(10, 5, 3, TILE_AIR); // Дверь второго этажа
 
-        // Южный вход: рампа смотрит на север — заходишь и поднимаешься, двигаясь вверх по экрану.
-        set(12, 7, 1, TILE_FLOOR);   // проём в южной стене комнаты на z=1
-        set(12, 8, 0, TILE_RAMP_N);  // рампа снаружи на земле (z=0)
+        // Укладываем блоки ступенек RAMP_E (подъём на восток) последовательной лесенкой:
+        set(8, 5, 0, TILE_RAMP_E);  // Шаг 1: Самая нижняя ступенька на улице, лежит на земле (z=0)
+        set(9, 5, 1, TILE_RAMP_E);  // Шаг 2: Средняя ступенька, висит в воздухе на уровне первого этажа (z=1)
+        set(10, 5, 2, TILE_RAMP_E); // Шаг 3: Верхняя ступенька, лежит прямо в проёме перекрытия (z=2)
 
-        set(12, 5, 1, TILE_AIR);     // отдельная дыра в полу комнаты — проверка обычного провала
+        // Площадка приземления на втором этаже — это клетка (11, 5). Там на z=2 лежит пол, а на z=3 — воздух.
+
+        // Внутренние отладочные элементы дома:
+        set(12, 5, 2, TILE_AIR); // Честная сквозная дыра в плите перекрытия между 1 и 2 этажами для теста падений
+        // Прорубаем отдельную южную дверь для первого этажа (убираем стену на уровне тела z=1)
+        set(12, 7, 1, TILE_AIR); // Теперь внутрь первого этажа можно зайти с юга!
     }
 
     bool saveToFile(const char* filename) const {
@@ -358,7 +377,7 @@ private:
 
     static constexpr float kFastMoveInterval = 1.0f / 33.0f; // подобрано на глаз (было 1/3 — казалось медленным)
     float moveRepeatTimer = 0.0f;
-    void tryAutoStep(Game& g, int dx, int dy);
+    void tryClimbLedge(Game& g, int dx, int dy);
     void tryAscendRamp(Game& g, uint8_t rampTile);
     void fallThroughHole(Game& g);
 };
@@ -463,51 +482,53 @@ inline void DrawTextCodepointInBox(Font font, int codepoint, Vector2 pos, float 
 // визуальная подсказка про возможность спуститься/провалиться туда).
 inline void DrawWorldTile(Font font, const GameMap& map, int x, int y, int z, Vector2 pos, float boxSize, int currentCameraZ)
 {
-    uint8_t tileId = map.get(x, y, z);
+    uint8_t tileId = map.get(x, y, z); //
 
     // СИТУАЦИЯ А: Мы рендерим пустую клетку воздуха
-    if (tileId == TILE_AIR) {
-        if (z > 0 && currentCameraZ > z) {
-            uint8_t below = map.get(x, y, z - 1);
-            if (IsRampTile(below)) {
-                uint8_t reverseTile = OppositeRampTile(below);
-                DrawTextCodepointInBox(font, RampArrowCodepoint(reverseTile), pos, boxSize, GOLD, BLANK);
+    if (tileId == TILE_AIR) { //
+        // Если под этим воздухом лежит рампа, И наша камера находится ВЫШЕ этой пустой клетки
+        // ИЛИ на одном уровне с ней (То есть ракурс камеры позволяет увидеть направление спуска)
+        if (z > 0 && currentCameraZ >= z) { //
+            uint8_t below = map.get(x, y, z - 1); //
+            if (IsRampTile(below)) { //
+                // Вместо разворота стрелки рисуем универсальный и понятный значок двусторонней лестницы ↔
+                int doubleArrowCodepoint = 0x2194;
+                DrawTextCodepointInBox(font, doubleArrowCodepoint, pos, boxSize, GOLD, BLANK);
                 return;
             }
         }
-        const RenderDef& rdef = TILE_RENDER[TILE_AIR];
-        DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+        // Обычный воздух
+        const RenderDef& rdef = TILE_RENDER[TILE_AIR]; //
+        DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor); //
         return;
     }
 
     // СИТУАЦИЯ Б: Мы рендерим саму рампу
-    if (IsRampTile(tileId)) {
-        if (currentCameraZ <= z + 1) {
-            DrawTextCodepointInBox(font, RampArrowCodepoint(tileId), pos, boxSize, GOLD, TILE_RENDER[tileId].bgColor);
+    if (IsRampTile(tileId)) { //
+        // Мы рисуем стрелку подъёма ТОЛЬКО если ракурс камеры находится ниже или ровно на уровне самой рампы (currentCameraZ <= z).
+        if (currentCameraZ <= z) { //
+            DrawTextCodepointInBox(font, RampArrowCodepoint(tileId), pos, boxSize, GOLD, TILE_RENDER[tileId].bgColor); //
         } else {
-            DrawTextCodepointInBox(font, ' ', pos, boxSize, BLANK, TILE_RENDER[tileId].bgColor);
+            // Если мы смотрим сверху, нижняя стрелка просто пропускается, уступая место значку ↔ из слоя воздуха
+            DrawTextCodepointInBox(font, ' ', pos, boxSize, BLANK, TILE_RENDER[tileId].bgColor); //
         }
         return;
     }
 
-    // СИТУАЦИЯ В: ВОКСЕЛЬНОЕ УЛУЧШЕНИЕ ДЛЯ СТЕН (TILE_WALL и TILE_BORDER_WALL)
-    // Если это блок стены, но плоскость камеры находится СТРОГО выше этого уровня (z < currentCameraZ),
-    // значит игрок смотрит на стену сверху вниз. Её верхняя грань должна читаться как плоский ПОЛ!
+    // СИТУАЦИЯ В: Воксельное улучшение для стен
     if (tileId == TILE_WALL || tileId == TILE_BORDER_WALL) {
         if (z < currentCameraZ) {
-            // Подменяем вертикальную решётку '#' на аккуратную точку пола '.'
-            // Но сохраняем родные цвета стены (LIGHTGRAY на DARKGRAY для обычных стен),
-            // чтобы крыша визуально отличалась от обычной земли.
             int roofCodepoint = '.';
             DrawTextCodepointInBox(font, roofCodepoint, pos, boxSize, TILE_RENDER[tileId].fgColor, TILE_RENDER[tileId].bgColor);
             return;
         }
     }
 
-    // Обычные блоки (включая стены на уровне глаз z == currentCameraZ)
-    const RenderDef& rdef = TILE_RENDER[tileId];
-    DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
+    // Обычные блоки
+    const RenderDef& rdef = TILE_RENDER[tileId]; //
+    DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor); //
 }
+
 
 
 
@@ -592,6 +613,7 @@ inline void Game_LoadFonts(Game &g)
     codepoints[352] = 0x25BC; // ▼
     codepoints[353] = 0x25BA; // ►
     codepoints[354] = 0x25C4; // ◄
+    codepoints[355] = 0x2194; // ↔ (Стрелка влево-вправо для режима спуска)
 
     constexpr int bufsize = 2048;
     char buf[bufsize];
@@ -854,6 +876,7 @@ inline void GameplayState::OnEnter(Game& g)
     // Камера сразу фокусируется на уровне глаз игрока
     cameraZ = player.z;
 }
+
 inline void GameplayState::tryMoveHorizontal(Game& g, int dx, int dy)
 {
     int nx = player.x + dx;
@@ -861,52 +884,68 @@ inline void GameplayState::tryMoveHorizontal(Game& g, int dx, int dy)
 
     if (nx < 0 || nx >= GameMap::Width || ny < 0 || ny >= GameMap::Height) return;
 
-    // 1. ПРОВЕРКА: Стоим ли мы уже на рампе прямо сейчас?
-    uint8_t currentUnderfootTile = g.worldMap.get(player.x, player.y, player.z - 1);
-    if (IsRampTile(currentUnderfootTile)) {
+    // 1. ПРОВЕРКА НА ЛЕСТНИЧНЫЙ МАРШ (Подъём на следующую ступень перед лицом)
+    // Если прямо перед лицом на уровне нашего тела (player.z) установлена рампа,
+    // И под её ногами (player.z - 1) лежит другая рампа — значит, перед нами крутая лестница!
+    uint8_t wallInFace = g.worldMap.get(nx, ny, player.z);
+    if (IsRampTile(wallInFace)) {
         int rdx, rdy;
-        RampDirectionVector(currentUnderfootTile, rdx, rdy);
+        RampDirectionVector(wallInFace, rdx, rdy);
+
+        // Если мы движемся строго по стрелке этой лестницы
         if (dx == rdx && dy == rdy) {
-            tryAscendRamp(g, currentUnderfootTile);
-            return;
+            // Делаем шаг на клетку лестницы по X/Y и сразу поднимаем тело на +1 воксель вверх
+            if (g.worldMap.get(nx, ny, player.z + 1) == TILE_AIR) {
+                player.x = nx;
+                player.y = ny;
+                player.z += 1;
+                return;
+            }
         }
+        return; // Сбоку на весящую в воздухе ступеньку запрыгнуть нельзя
     }
 
-    // 2. ПРОВЕРКА: Пытаемся ли мы зайти на клетку с рампой?
+    // 2. ПРОВЕРКА: Пытаемся ли мы наступить ногами на клетку с рампой?
+    uint8_t targetGround = g.worldMap.get(nx, ny, player.z - 1);
+    // 2. ПРОВЕРКА: Пытаемся ли мы зайти на клетку, где под ногами установлена рампа?
     if (g.worldMap.inBounds(nx, ny, player.z - 1)) {
         uint8_t targetUnderfootTile = g.worldMap.get(nx, ny, player.z - 1);
         if (IsRampTile(targetUnderfootTile)) {
             int rdx, rdy;
             RampDirectionVector(targetUnderfootTile, rdx, rdy);
-            if (dx != rdx || dy != rdy) return; // Блокируем шаг сбоку
+
+            // На рампу можно наступить либо с её пологого основания (dx == rdx && dy == rdy),
+            // ЛИБО если мы спускаемся на неё сверху со следующего этажа (двигаясь в противоположную сторону).
+            // Если же игрок пытается наступить на неё сбоку (dx == 0 или dy == 0 не по оси рампы) — блокируем.
+            bool isMovingAlongRampAxis = (dx == rdx && dy == rdy) || (dx == -rdx && dy == -rdy);
+            if (!isMovingAlongRampAxis) {
+                return; // Сбоку рампа по-прежнему блокирует нас как твёрдый куб
+            }
         }
     }
 
-    // 3. ОБЫЧНОЕ ДВИЖЕНИЕ: Стандартная воксельная проходимость
+
+    // 3. ОБЫЧНОЕ ДВИЖЕНИЕ: Стандартная воксельная проходимость (свободно для тела, прочно для ног)
     if (g.worldMap.isWalkable(nx, ny, player.z)) {
         player.x = nx;
         player.y = ny;
         return;
     }
 
-    // 4. ПРОВЕРКА НА ОБРЫВ/ДЫРУ: Свободно перед лицом, но пусто под ногами
+    // 4. ПРОВЕРКА НА ОБРЫВ ИЛИ ДЫРУ В ПОЛУ (Падение вниз)
     uint8_t targetBody = g.worldMap.get(nx, ny, player.z);
-    uint8_t targetGround = g.worldMap.get(nx, ny, player.z - 1);
-
     if (!TILE_PHYSICS[targetBody].isSolid && targetGround == TILE_AIR) {
         player.x = nx;
         player.y = ny;
         fallThroughHole(g);
         return;
     }
-
-    // Мягкое завершение: если ни одно условие не выполнено, игрок просто упирается в препятствие
 }
 
 
 
 
-inline void GameplayState::tryAutoStep(Game& g, int dx, int dy)
+inline void GameplayState::tryClimbLedge(Game& g, int dx, int dy)
 {
     int nx = player.x + dx;
     int ny = player.y + dy;
@@ -932,37 +971,21 @@ inline void GameplayState::tryAutoStep(Game& g, int dx, int dy)
         }
     }
 }
-
 inline void GameplayState::tryAscendRamp(Game& g, uint8_t rampTile)
 {
-    int rdx, rdy;
-    RampDirectionVector(rampTile, rdx, rdy);
+    // Воксельная лесенка: подъём на месте на +1 блок вверх (переход тела на уровень следующей ступени)
+    int lz = player.z + 1;
 
-    // Целевая точка для тела игрока (комбинированное смещение Клода):
-    // Шаг вперёд по направлению стрелки рампы и подъём на +1 уровень по воксельной оси Z
-    int lx = player.x + rdx;
-    int ly = player.y + rdy;
-    int lz = player.z + 1; // Новая высота тела/глаз игрока
+    if (lz >= GameMap::Depth) return;
 
-    if (!g.worldMap.inBounds(lx, ly, lz)) return;
-
-    // 1. Проверяем свободное место для тела/головы на новой высоте (lz)
-    uint8_t targetBody = g.worldMap.get(lx, ly, lz);
+    // Проверяем свободное место для тела/головы на новой высоте ступеньки
+    uint8_t targetBody = g.worldMap.get(player.x, player.y, lz);
     if (TILE_PHYSICS[targetBody].isSolid) return; // Упёрлись головой в потолок
 
-    // 2. Проверяем, на что встанут ноги на новой клетке.
-    // Ноги окажутся на уровне lz - 1 (что физически равно старому player.z).
-    // Там должен быть прочный, проходимый пол верхнего этажа.
-    uint8_t targetGround = g.worldMap.get(lx, ly, lz - 1);
-    if (targetGround == TILE_AIR) {
-        return; // Наверху провал/пустота, наступить не на что
-    }
-
-    // Перемещаем персонажа (комбинированный шаг Клода выполнен)
-    player.x = lx;
-    player.y = ly;
+    // Поднимаем глаза персонажа на следующий воксельный ярус
     player.z = lz;
 }
+
 
 
 inline void GameplayState::fallThroughHole(Game& g)
@@ -1057,14 +1080,15 @@ inline void GameplayState::OnUpdate(Game& g, float dt)
 
     if (ctrlHeld) {
         moveRepeatTimer = 0.0f;
-        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) { tryAutoStep(g, -1, 0); moved = true; }
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) { tryAutoStep(g, 1, 0);  moved = true; }
-        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) { tryAutoStep(g, 0, -1); moved = true; }
-        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) { tryAutoStep(g, 0, 1);  moved = true; }
-        if (IsKeyPressed(KEY_E)) { tryAutoStep(g, 1, -1); moved = true; }
-        if (IsKeyPressed(KEY_Z)) { tryAutoStep(g, -1, 1); moved = true; }
-        if (IsKeyPressed(KEY_X)) { tryAutoStep(g, 1, 1);  moved = true; }
-    } else if (fastMove) {
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) { tryClimbLedge(g, -1, 0); moved = true; }
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) { tryClimbLedge(g, 1, 0);  moved = true; }
+        if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) { tryClimbLedge(g, 0, -1); moved = true; }
+        if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) { tryClimbLedge(g, 0, 1);  moved = true; }
+        if (IsKeyPressed(KEY_E)) { tryClimbLedge(g, 1, -1); moved = true; }
+        if (IsKeyPressed(KEY_Z)) { tryClimbLedge(g, -1, 1); moved = true; }
+        if (IsKeyPressed(KEY_X)) { tryClimbLedge(g, 1, 1);  moved = true; }
+    }
+  else if (fastMove) {
         if (currentMoveDirection(dx, dy)) {
             moved = true; // Бег запущен
             moveRepeatTimer += dt;
@@ -1104,7 +1128,6 @@ inline void GameplayState::OnUpdate(Game& g, float dt)
     }
 
 }
-
 inline void GameplayState::OnDraw(const Game& g, float dt)
 {
     ClearBackground(BLACK);
@@ -1127,33 +1150,40 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
 
     // 1. ПОСЛОЙНЫЙ РЕНДЕРИНГ КАРТЫ (Снизу вверх)
     for (int z = bottomZ; z <= topZ; ++z) {
-        // РАСШИРЯЕМ ЦИКЛЫ: начинаем с -1 и заканчиваем на <= Height / Width,
-        // чтобы прорисовать виртуальные "стены-призраки" за границами массива
         for (int y = -1; y <= GameMap::Height; y++) {
             for (int x = -1; x <= GameMap::Width; x++) {
-                   Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
+                Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
 
                 if (pos.x <= -boxSize || pos.x >= screenW || pos.y <= -boxSize || pos.y >= screenH) {
                     continue;
                 }
 
-                // Проверка перекрытия (Occlusion Check)
+                // АБСОЛЮТНЫЙ OCCLUSION CHECK (Проверка перекрытия верхними вокселями):
+                // Если между текущим слоем z и ракурсом камеры topZ есть ХОТЬ ОДИН непрозрачный блок,
+                // ИЛИ если там есть воздух, который уже взял на себя отрисовку значка спуска лестницы ↔,
+                // то текущий глубокий слой z полностью скрыт от глаз. Мы его отсекаем!
                 bool isHidden = false;
                 for (int checkZ = z + 1; checkZ <= topZ; ++checkZ) {
-                    if (g.worldMap.get(x, y, checkZ) != TILE_AIR) {
+                    uint8_t upperTile = g.worldMap.get(x, y, checkZ);
+
+                    // Если выше лежит стена/пол ИЛИ если это воздух над рампой в режиме спуска
+                    if (upperTile != TILE_AIR) {
                         isHidden = true;
                         break;
+                    }
+                    if (upperTile == TILE_AIR && checkZ > 0) {
+                        if (IsRampTile(g.worldMap.get(x, y, checkZ - 1)) && cameraZ >= checkZ) {
+                            isHidden = true;
+                            break;
+                        }
                     }
                 }
                 if (isHidden) continue;
 
-                // Рисуем тайл текущего слоя
+                // Рисуем тайл текущего слоя (теперь на экране гарантированно будет ОДИН чистый символ на клетку)
                 DrawWorldTile(fontToUse, g.worldMap, x, y, z, pos, boxSize, cameraZ);
 
-
-                // ИСПРАВЛЕНИЕ ВУАЛИ:
-                // Уровень под ногами камеры (cameraZ - 1) — это базовая земля, она рисуется БЕЗ вуали.
-                // Вуаль ложится ТОЛЬКО на слои, которые находятся СТРОГО ниже этого уровня (z < cameraZ - 1).
+                // ВУАЛЬ ГЛУБИНЫ:
                 if (z < cameraZ - 1) {
                     DrawRectangle((int)pos.x, (int)pos.y, (int)boxSize, (int)boxSize, kVeilColor);
                 }
@@ -1162,14 +1192,12 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
     }
 
     // 2. ОТРИСОВКА ПЕРСОНАЖА @ (С воксельной вуалью глубины и прозрачностью над потолком)
-    // Рисуем игрока, если его тело попадает в диапазон видимости камеры, ЛИБО если он находится выше среза камеры (над головой)
     if (player.z >= bottomZ) {
         Vector2 playerPos = { player.x * boxSize + camOffsetX, player.y * boxSize + camOffsetY };
         Color playerColor = YELLOW;
 
         if (player.z < cameraZ) {
-            // СИТУАЦИЯ А: Персонаж находится ГЛУБЖЕ камеры (под ногами)
-            // Накладываем синюю вуаль глубины
+            // Персонаж глубже камеры (под ногами)
             int playerDepthDiff = cameraZ - player.z;
             float blend = playerDepthDiff * 0.35f;
             if (blend > 0.85f) blend = 0.85f;
@@ -1179,12 +1207,10 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
             playerColor.b = (unsigned char)(YELLOW.b * (1.0f - blend) + kVeilColor.b * blend);
         }
         else if (player.z > cameraZ) {
-            // СИТУАЦИЯ Б: Персонаж находится ВЫШЕ камеры (над головой / на потолке)
-            // Делаем его полупрозрачным фантомом, чтобы игрок понимал, где находится тело
-            playerColor = Fade(YELLOW, 0.45f); // Снижаем альфа-канал до 45% (около 115 из 255)
+            // Персонаж выше камеры (над головой)
+            playerColor = Fade(YELLOW, 0.45f);
         }
 
-        // Рисуем символ игрока
         DrawTextCodepointInBox(fontToUse, '@', playerPos, boxSize, playerColor, BLANK);
     }
 
