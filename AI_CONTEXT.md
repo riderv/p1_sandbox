@@ -86,3 +86,40 @@ for (int y = 0; y < GameMap::Height; y++) {
 * The actual solid block the player stands on is always located at `player.z - 1`. 
 * Example: To stand on the ground level (bedrock/earth at `z=0`), the player must have `player.z = 1`. Moving to `z=0` is blocked because it is physically inside the solid ground block.
 * All physics checks (`isWalkable`, `tryClimb`, `fallThroughHole`, and ramps) must be updated to inspect `z - 1` for standing support and `z` for body headroom.
+
+
+
+## Core Tech Stack
+* C++23, `-fno-exceptions`, `-fno-rtti`, Raylib 6.0+. Hobby project.
+* **Error handling:** no `noexcept` anywhere — early crash/abort on unrecoverable errors, or explicit `bool`/`nullptr`/return-code checks otherwise.
+
+## Renderer Customizations (`DrawTextCodepointInBox`)
+* Fixed-box glyph rendering with pixel snapping and font-size LOD.
+* **Composite multi-slice rendering & Camera Z scrubbing — fully integrated.**
+* Render loops optimized to `Z -> Y -> X` ordering for efficient Raylib batching.
+* **Top-Down Occlusion Check implemented:** Upper opaque tiles fully block lower layers from rendering on the same X/Y cell. `kVeilColor` depth overlays apply strictly to empty air spaces (`TILE_AIR`) below the camera's baseline (`z < cameraZ - 1`).
+* **Smart Ramp Arrow Rendering:** `DrawWorldTile` dynamically chooses a single valid arrow representation depending on the camera's Z. Ascending arrows display from below, while descending arrows render only when scrubbing above the headroom layer. The overlapping 'H' stairs character has been removed for a cleaner ASCII aesthetic.
+* **Dynamic Player Veil:** `@` automatically darkens and blends with `kVeilColor` when the camera scrubs above the entity's physical location. It fades to a translucent phantom silhouette if the camera dives completely underneath its standing layer.
+
+## Data Structures
+* `RenderDef`/`PhysicsDef` indexed by `TileId`.
+* `TileId`: `TILE_AIR`, `TILE_FLOOR`, `TILE_WALL`, `TILE_WATER`, `TILE_DOOR`, `TILE_RAMP_N/S/E/W`.
+* `GameMap`: `Depth = 4`. High-altitude boundary walls generated seamlessly up to `Depth - 1` inside `initDefault()`.
+
+## True-Voxel World Model (Minecraft-style Z-axis)
+* **Crucial Paradigm Shift — Completed:** The entity's `z` coordinate represents the exact space occupied by the body/head (which expects `TILE_AIR`). The solid block supporting the feet is located strictly at `z - 1`.
+* Spawn points, camera focus, and map triggers shifted from `z = 0` to `z = 1` across all states.
+* `isWalkable` rigorously verifies non-solid body headroom at `z` and solid grounding underneath at `z - 1`.
+* `fallThroughHole` cascades downward through open air, safely locking the entity's position exactly one tile above the first discovered solid layer.
+
+## GameplayState
+* Movement: WASD/arrows/QEZX same-level only; Shift = continuous run.
+* Boundary safety checks embedded into `tryMoveHorizontal` to mitigate off-map OOB read/write memory violations.
+* **Ramps (Voxel Adaptation):** Accessing a ramp cell requires entering through its ascending vector. Standing on a ramp and stepping forward activates a combined `tryAscendRamp` translation (`dx/dy` forward, `z+1` upward). Descending leverages automatic gravity fall-throughs upon retreating into the open headroom.
+* `tryClimb` (vertical shafts): Restricts movement to valid `TILE_AIR` paths adjacent to at least one anchoring `TILE_WALL`.
+* `tryAutoStep` (Ctrl held): Patched to prevent clipping through directional ramp angles from invalid side trajectories.
+
+## CURRENT TODO LIST / BACKLOG
+1. **[VERIFY] Debug newly discovered anomalous behavior:** Playtest Room 3 to analyze the strange physics quirk found during ramp scrubbing.
+2. **[BUG] Shared `zoom` on `Game`:** still leaks between states; root cause in `MainMenu::OnUpdate` not fixed.
+3. **[Feature] Doors:** map objects (separate layer), not started.
