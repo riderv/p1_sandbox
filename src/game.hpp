@@ -48,6 +48,7 @@ struct MainMenu: IGameState
      TILE_RAMP_S, // юг (вниз на экране)
      TILE_RAMP_E, // восток (вправо)
      TILE_RAMP_W, // запад (влево)
+     TILE_BORDER_WALL, // Виртуальная граница мира
      TILE_COUNT
  };
 
@@ -68,6 +69,8 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
     { 0x25BC,   GOLD,       BLANK }, //TILE_RAMP_S (▼)
     { 0x25BA,   GOLD,       BLANK }, //TILE_RAMP_E (►)
     { 0x25C4,   GOLD,       BLANK }, //TILE_RAMP_W (◄)
+    { '#',      { 80, 80, 80, 255 }, BLANK }, //❌ TILE_BORDER_WALL (Тусклая решётка без фона — "административная" стена)
+
 };
 
 
@@ -85,6 +88,7 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      { .isSolid = false }, //TILE_RAMP_S
      { .isSolid = false }, //TILE_RAMP_E
      { .isSolid = false }, //TILE_RAMP_W
+     { .isSolid = true },  //❌ TILE_BORDER_WALL (Абсолютно твёрдая)
 };
 
 
@@ -97,7 +101,8 @@ inline const RenderDef TILE_RENDER[TILE_COUNT] = {
      "Рампа на север",
      "Рампа на юг",
      "Рампа на восток",
-     "Рампа на запад"
+     "Рампа на запад",
+     "Граница мира", // <-- ДОБАВИТЬ ОПИСАНИЕ СЮДА
  };
 
  static_assert(sizeof(TILE_RENDER) / sizeof(RenderDef) == TILE_COUNT, "Забыл RenderDef!");
@@ -155,13 +160,32 @@ struct GameMap {
 
     array<uint8_t, Width * Height * Depth> tileIds;
 
-    // Новые, Z-осознанные аксессоры.
-    uint8_t get(int x, int y, int z) const { return tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)z)]; }
-    void set(int x, int y, int z, uint8_t id) { tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)z)] = id; }
+    // Новые, Z-осознанные безопасные аксессоры.
+    uint8_t get(int x, int y, int z) const {
+        // Если координаты X/Y вышли за пределы массива — перед нами виртуальная граница мира!
+        if (x < 0 || x >= Width || y < 0 || y >= Height) {
+            return TILE_BORDER_WALL;
+        }
+        // Зажимаем высоту Z в безопасные границы
+        int safeZ = z;
+        if (safeZ < 0) safeZ = 0;
+        if (safeZ >= Depth) safeZ = Depth - 1;
 
-    // Старые 2D-аксессоры сохранены как есть: работают с нижним слоем
-    // (z = 0), чтобы MapEditor и формат map.dat пока не трогать —
-    // многослойный редактор и сохранение придут вместе с чанкованием.
+        return tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)safeZ)];
+    }
+
+    void set(int x, int y, int z, uint8_t id) {
+        // В виртуальные стены за границей писать нельзя
+        if (x < 0 || x >= Width || y < 0 || y >= Height) return;
+
+        int safeZ = z;
+        if (safeZ < 0) safeZ = 0;
+        if (safeZ >= Depth) safeZ = Depth - 1;
+
+        tileIds[(size_t)x + Width * ((size_t)y + Height * (size_t)safeZ)] = id;
+    }
+
+    // 2D-аксессоры автоматически используют безопасный 3D-get
     uint8_t get(int x, int y) const { return get(x, y, 0); }
     void set(int x, int y, uint8_t id) { set(x, y, 0, id); }
 
@@ -443,18 +467,14 @@ inline void DrawWorldTile(Font font, const GameMap& map, int x, int y, int z, Ve
 
     // СИТУАЦИЯ А: Мы рендерим пустую клетку воздуха
     if (tileId == TILE_AIR) {
-        // Если под этим воздухом лежит рампа, И наша камера находится ВЫШЕ этой пустой клетки
-        // (То есть ракурс камеры позволяет заглянуть ВНУТРЬ проёма на спуск)
         if (z > 0 && currentCameraZ > z) {
             uint8_t below = map.get(x, y, z - 1);
             if (IsRampTile(below)) {
                 uint8_t reverseTile = OppositeRampTile(below);
-                // Рисуем ТОЛЬКО стрелку спуска (движение вниз по рампам)
                 DrawTextCodepointInBox(font, RampArrowCodepoint(reverseTile), pos, boxSize, GOLD, BLANK);
                 return;
             }
         }
-        // Обычный воздух
         const RenderDef& rdef = TILE_RENDER[TILE_AIR];
         DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
         return;
@@ -462,21 +482,29 @@ inline void DrawWorldTile(Font font, const GameMap& map, int x, int y, int z, Ve
 
     // СИТУАЦИЯ Б: Мы рендерим саму рампу
     if (IsRampTile(tileId)) {
-        // Условие Одиночной Стрелки:
-        // Мы рисуем стрелку подъёма ТОЛЬКО если ракурс камеры находится на уровне самой рампы
-        // или на уровне её проёма (currentCameraZ <= z + 1).
-        // Если камера поднялась ЕЩЁ выше, то этот слой z будет полностью визуально заменён
-        // стрелкой спуска, которую отрисует слой воздуха TILE_AIR над ней (см. Ситуацию А).
         if (currentCameraZ <= z + 1) {
             DrawTextCodepointInBox(font, RampArrowCodepoint(tileId), pos, boxSize, GOLD, TILE_RENDER[tileId].bgColor);
         } else {
-            // Если мы смотрим совсем сверху, нижняя стрелка просто пропускается, чтобы не было наложения
             DrawTextCodepointInBox(font, ' ', pos, boxSize, BLANK, TILE_RENDER[tileId].bgColor);
         }
         return;
     }
 
-    // Обычные блоки
+    // СИТУАЦИЯ В: ВОКСЕЛЬНОЕ УЛУЧШЕНИЕ ДЛЯ СТЕН (TILE_WALL и TILE_BORDER_WALL)
+    // Если это блок стены, но плоскость камеры находится СТРОГО выше этого уровня (z < currentCameraZ),
+    // значит игрок смотрит на стену сверху вниз. Её верхняя грань должна читаться как плоский ПОЛ!
+    if (tileId == TILE_WALL || tileId == TILE_BORDER_WALL) {
+        if (z < currentCameraZ) {
+            // Подменяем вертикальную решётку '#' на аккуратную точку пола '.'
+            // Но сохраняем родные цвета стены (LIGHTGRAY на DARKGRAY для обычных стен),
+            // чтобы крыша визуально отличалась от обычной земли.
+            int roofCodepoint = '.';
+            DrawTextCodepointInBox(font, roofCodepoint, pos, boxSize, TILE_RENDER[tileId].fgColor, TILE_RENDER[tileId].bgColor);
+            return;
+        }
+    }
+
+    // Обычные блоки (включая стены на уровне глаз z == currentCameraZ)
     const RenderDef& rdef = TILE_RENDER[tileId];
     DrawTextCodepointInBox(font, rdef.codepoint, pos, boxSize, rdef.fgColor, rdef.bgColor);
 }
@@ -1099,9 +1127,11 @@ inline void GameplayState::OnDraw(const Game& g, float dt)
 
     // 1. ПОСЛОЙНЫЙ РЕНДЕРИНГ КАРТЫ (Снизу вверх)
     for (int z = bottomZ; z <= topZ; ++z) {
-        for (int y = 0; y < GameMap::Height; y++) {
-            for (int x = 0; x < GameMap::Width; x++) {
-                Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
+        // РАСШИРЯЕМ ЦИКЛЫ: начинаем с -1 и заканчиваем на <= Height / Width,
+        // чтобы прорисовать виртуальные "стены-призраки" за границами массива
+        for (int y = -1; y <= GameMap::Height; y++) {
+            for (int x = -1; x <= GameMap::Width; x++) {
+                   Vector2 pos = { x * boxSize + camOffsetX, y * boxSize + camOffsetY };
 
                 if (pos.x <= -boxSize || pos.x >= screenW || pos.y <= -boxSize || pos.y >= screenH) {
                     continue;

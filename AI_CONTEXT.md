@@ -123,3 +123,11 @@ for (int y = 0; y < GameMap::Height; y++) {
 1. **[VERIFY] Debug newly discovered anomalous behavior:** Playtest Room 3 to analyze the strange physics quirk found during ramp scrubbing.
 2. **[BUG] Shared `zoom` on `Game`:** still leaks between states; root cause in `MainMenu::OnUpdate` not fixed.
 3. **[Feature] Doors:** map objects (separate layer), not started.
+
+## Multi-Story Voxel Structures (Ceilings & Floors)
+* Hanging 2D planes/plates do not exist. A floor separating two stories is a full 1x1x1 solid voxel layer.
+* Standard 2-story building layout:
+  - `z = 0`: Ground foundation under the building (Solid floor/stone).
+  - `z = 1`: 1st-story living space (TILE_AIR for body/head, surrounded by TILE_WALL).
+  - `z = 2`: Inter-floor structural slab (Solid TILE_FLOOR acting as 1st-story ceiling and 2nd-story ground support).
+  - `z = 3`: 2nd-story living space (TILE_AIR for body/head, surrounded by TILE_WALL).
